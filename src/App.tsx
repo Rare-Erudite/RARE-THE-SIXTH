@@ -61,10 +61,18 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle
 } from 'lucide-react';
 import { themes, ThemeKey, ThemeConfig } from './theme';
-import { safeFetch, safePost } from './api';
+import {
+  safeFetch,
+  safePost,
+  subscribeConnectionState,
+  getBackendUrl,
+  setBackendUrl,
+  BackendConnectionState
+} from './api';
 import { ImageStudioWorkspaceView } from './ImageStudioWorkspaceView';
 import { DownloadAppModal } from './DownloadAppModal';
 import { UpdateModal, AppUpdate } from './UpdateModal';
@@ -271,6 +279,18 @@ export default function App() {
   const [clientVersion, setClientVersion] = useState<string>(() => {
     return localStorage.getItem('rare_client_version') || '1.0.0';
   });
+
+  const [connectionStatus, setConnectionStatus] = useState<BackendConnectionState>({
+    reachable: true,
+    lastChecked: Date.now(),
+    configuredUrl: '',
+  });
+
+  useEffect(() => {
+    return subscribeConnectionState((state) => {
+      setConnectionStatus(state);
+    });
+  }, []);
 
   const checkForUpdates = async (forceOpenModal = false) => {
     const channel = isDeveloperAuthed ? 'developer' : 'public';
@@ -1081,8 +1101,26 @@ export default function App() {
             >
               {voiceEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
             </button>
-          </div>
         </header>
+
+        {/* Visible Backend Connection Status Warning Banner */}
+        {!connectionStatus.reachable && (
+          <div className="bg-amber-950/70 border-b border-amber-500/40 px-4 py-2 text-xs text-amber-200 flex items-center justify-between shrink-0 animate-in fade-in">
+            <div className="flex items-center space-x-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                <strong>Cloud Backend Unreachable:</strong> {connectionStatus.lastError || 'Network request failed'}.
+                The app is currently operating in local mode.
+              </span>
+            </div>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className="text-amber-300 hover:text-white underline font-semibold ml-2 text-[11px] shrink-0 cursor-pointer"
+            >
+              Configure URL in Settings
+            </button>
+          </div>
+        )}
 
         {/* View Content Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">

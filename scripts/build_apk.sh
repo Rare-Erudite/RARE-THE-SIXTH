@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== [1/8] Building Production Web Assets ==="
+echo "=== [1/8] Building Web Production Assets with Vite ==="
 npm run build
 
 BUILD_DIR="/tmp/android_apk_build"
@@ -17,85 +17,15 @@ mkdir -p "$BUILD_DIR/res/mipmap-xxxhdpi"
 mkdir -p "$BUILD_DIR/assets/www"
 
 # 2. Copy web assets to assets/www
-echo "=== [2/8] Preparing Offline Web Bundle & Sanitizing Assets ==="
+echo "=== [2/8] Packaging Web Application Bundle ==="
 cp -r dist/* "$BUILD_DIR/assets/www/"
 
-# Fix index.html for Android WebView file:/// compatibility:
-# a) Remove crossorigin attributes which break Chromium WebView on file:// URLs
-sed -i 's|crossorigin=""||g' "$BUILD_DIR/assets/www/index.html"
-sed -i 's|crossorigin ||g' "$BUILD_DIR/assets/www/index.html"
-sed -i 's|crossorigin||g' "$BUILD_DIR/assets/www/index.html"
-
-# b) Fix absolute asset paths to relative
-sed -i 's|src="/assets/|src="assets/|g' "$BUILD_DIR/assets/www/index.html"
-sed -i 's|href="/assets/|href="assets/|g' "$BUILD_DIR/assets/www/index.html"
-sed -i 's|src="/registerSW.js"|src="registerSW.js"|g' "$BUILD_DIR/assets/www/index.html"
-sed -i 's|href="/manifest.webmanifest"|href="manifest.webmanifest"|g' "$BUILD_DIR/assets/www/index.html"
-sed -i 's|href="/apple-touch-icon.png"|href="apple-touch-icon.png"|g' "$BUILD_DIR/assets/www/index.html"
-sed -i 's|href="/icon.svg"|href="icon.svg"|g' "$BUILD_DIR/assets/www/index.html"
-sed -i 's|href="/favicon.ico"|href="favicon.ico"|g' "$BUILD_DIR/assets/www/index.html"
-
-# c) Inject Base URL and Native API Interceptor Bridge into head
-cat << 'INJECT' > /tmp/bridge_head.html
-<base href="file:///android_asset/www/">
-<script>
-  window.__RARE_STANDALONE_APK__ = true;
-  window.__RARE_VERSION__ = "1.0.0";
-  window.__RARE_LIVE_SERVER__ = "https://ais-pre-uoeyrv5bu6vt7rpmnso4sd-66589983138.europe-west1.run.app";
-
-  // Route API requests to live cloud when connected or offline fallback
-  (function() {
-    const originalFetch = window.fetch;
-    window.fetch = function(resource, init) {
-      if (typeof resource === 'string' && resource.startsWith('/api/')) {
-        return originalFetch.call(this, window.__RARE_LIVE_SERVER__ + resource, init).catch(function(err) {
-          console.warn('Live API request failed, serving offline autonomous fallback:', err);
-          if (resource === '/api/models') {
-            return new Response(JSON.stringify({
-              models: [{
-                id: 'rare-offline-cognitive',
-                name: 'RARE Offline Cognitive Engine',
-                architecture: 'Autonomous Offline Model & Vector Space',
-                is_available: true,
-                active: true,
-                type: 'offline_cognitive'
-              }],
-              active: 'rare-offline-cognitive'
-            }), { headers: { 'Content-Type': 'application/json' } });
-          }
-          if (resource === '/api/chat') {
-            return new Response(JSON.stringify({
-              response: "RARE autonomous mobile core active. Running on standalone device intelligence with persistent memory.",
-              provider: "rare-offline-cognitive",
-              memoriesUsed: 0
-            }), { headers: { 'Content-Type': 'application/json' } });
-          }
-          throw err;
-        });
-      }
-      return originalFetch.call(this, resource, init);
-    };
-  })();
-</script>
-INJECT
-
-# Insert injection right after <head>
-python3 -c '
-with open("'"$BUILD_DIR"'/assets/www/index.html", "r", encoding="utf-8") as f:
-    html = f.read()
-with open("/tmp/bridge_head.html", "r", encoding="utf-8") as f:
-    inject = f.read()
-html = html.replace("<head>", "<head>\n" + inject)
-with open("'"$BUILD_DIR"'/assets/www/index.html", "w", encoding="utf-8") as f:
-    f.write(html)
-'
-
-# 3. Bundle Genuine Offline Model Weights & Knowledge Base (18+ MB)
-echo "=== [3/8] Packaging Offline Cognitive Weights, Embeddings & Datasets ==="
+# 3. Bundle Offline Knowledge Corpus & Assets
+echo "=== [3/8] Packaging Knowledge Corpus and Assets ==="
 python3 scripts/prepare_apk_assets.py "$BUILD_DIR/assets"
 
 # 4. App Launcher Icons
-echo "=== [4/8] Installing High-Resolution Launcher Icons ==="
+echo "=== [4/8] Installing High-Density Launcher Icons ==="
 cp public/pwa-192x192.png "$BUILD_DIR/res/mipmap-mdpi/ic_launcher.png"
 cp public/pwa-192x192.png "$BUILD_DIR/res/mipmap-hdpi/ic_launcher.png"
 cp public/pwa-192x192.png "$BUILD_DIR/res/mipmap-xhdpi/ic_launcher.png"
@@ -131,7 +61,8 @@ cat << 'EOF' > "$BUILD_DIR/AndroidManifest.xml"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:hardwareAccelerated="true">
+        android:hardwareAccelerated="true"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name="com.rare.ai.intelligence.MainActivity"
@@ -149,17 +80,15 @@ cat << 'EOF' > "$BUILD_DIR/AndroidManifest.xml"
 </manifest>
 EOF
 
-# 6. Native MainActivity with Dual-Mode Loading & Splash Screen (Zero Blank Screen)
+# 6. Native MainActivity with Embedded Local Asset Server & Splash Screen
 cat << 'EOF' > "$BUILD_DIR/src/com/rare/ai/intelligence/MainActivity.java"
 package com.rare.ai.intelligence;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
+import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -172,6 +101,8 @@ import android.view.WindowManager;
 import android.webkit.ConsoleMessage;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -181,16 +112,21 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Button;
 
-public class MainActivity extends Activity {
-    private static final String CLOUD_URL = "https://ais-pre-uoeyrv5bu6vt7rpmnso4sd-66589983138.europe-west1.run.app";
-    private static final String OFFLINE_URL = "file:///android_asset/www/index.html";
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 
+public class MainActivity extends Activity {
     private WebView mWebView;
     private FrameLayout mRootLayout;
     private LinearLayout mSplashLayout;
     private ProgressBar mProgressBar;
     private TextView mStatusText;
     private boolean mHasLoadedSuccessfully = false;
+    private LocalAssetServer mServer;
     private Handler mHandler = new Handler(Looper.getMainLooper());
 
     @Override
@@ -198,7 +134,6 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        // Hardware Acceleration & Dark Theme UI
         Window window = getWindow();
         window.setFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED, WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -213,16 +148,16 @@ public class MainActivity extends Activity {
         setupWebView();
         mRootLayout.addView(mWebView);
 
-        // 2. Setup Native Splash Screen Overlay (Guarantees NO BLANK SCREEN ever!)
+        // 2. Setup Splash Screen Overlay (Guarantees NO BLANK SCREEN ever)
         setupSplashScreen();
         mRootLayout.addView(mSplashLayout);
 
         setContentView(mRootLayout);
 
-        // 3. Initiate Loading with auto-fallback
-        loadApp();
+        // 3. Start Local HTTP Server for local web assets
+        startLocalServerAndLoad();
 
-        // 4. Safety Watchdog: If page hasn't shown in 8 seconds, reveal WebView or load offline bundle
+        // 4. Watchdog fallback: Reveal WebView after timeout if needed
         mHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -233,13 +168,13 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-        }, 8000);
+        }, 6000);
     }
 
     private void setupWebView() {
         mWebView = new WebView(this);
         mWebView.setBackgroundColor(Color.parseColor("#03040A"));
-        mWebView.setVisibility(View.INVISIBLE); // Keep hidden until page renders
+        mWebView.setVisibility(View.INVISIBLE);
 
         WebSettings settings = mWebView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -247,8 +182,6 @@ public class MainActivity extends Activity {
         settings.setDatabaseEnabled(true);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
-        
-        // Critical permissions for offline assets & modern web features:
         settings.setAllowFileAccessFromFileURLs(true);
         settings.setAllowUniversalAccessFromFileURLs(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -273,7 +206,6 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 mHasLoadedSuccessfully = true;
-                // Reveal WebView and hide Splash
                 if (mWebView != null && mSplashLayout != null) {
                     mWebView.setVisibility(View.VISIBLE);
                     mSplashLayout.setVisibility(View.GONE);
@@ -283,20 +215,14 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
                 super.onReceivedError(view, errorCode, description, failingUrl);
-                // If cloud URL fails, seamlessly fall back to local offline bundle
-                if (failingUrl != null && failingUrl.startsWith("http") && !failingUrl.equals(OFFLINE_URL)) {
-                    if (mStatusText != null) {
-                        mStatusText.setText("Switching to offline standalone mode...");
-                    }
-                    view.loadUrl(OFFLINE_URL);
-                } else {
-                    showErrorFallback(description);
+                if (failingUrl != null && failingUrl.startsWith("http://127.0.0.1")) {
+                    view.loadUrl("file:///android_asset/www/index.html");
                 }
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://")) {
+                if (url.startsWith("http://127.0.0.1") || url.startsWith("file:///android_asset/")) {
                     return false;
                 }
                 try {
@@ -316,7 +242,7 @@ public class MainActivity extends Activity {
                 if (mProgressBar != null) {
                     mProgressBar.setProgress(newProgress);
                 }
-                if (newProgress >= 80 && !mHasLoadedSuccessfully) {
+                if (newProgress >= 85 && !mHasLoadedSuccessfully) {
                     mHasLoadedSuccessfully = true;
                     mWebView.setVisibility(View.VISIBLE);
                     mSplashLayout.setVisibility(View.GONE);
@@ -345,7 +271,6 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams.MATCH_PARENT
         ));
 
-        // App Title
         TextView titleText = new TextView(this);
         titleText.setText("RARE");
         titleText.setTextSize(36);
@@ -354,16 +279,14 @@ public class MainActivity extends Activity {
         titleText.setPadding(0, 0, 0, 8);
         mSplashLayout.addView(titleText);
 
-        // Subtitle
         TextView subTitle = new TextView(this);
         subTitle.setText("Autonomous AI Intelligence Core");
         subTitle.setTextSize(14);
-        subTitle.setTextColor(Color.parseColor("#818CF8")); // Indigo 400
+        subTitle.setTextColor(Color.parseColor("#818CF8"));
         subTitle.setGravity(Gravity.CENTER);
         subTitle.setPadding(0, 0, 0, 32);
         mSplashLayout.addView(subTitle);
 
-        // Progress Spinner
         mProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         mProgressBar.setIndeterminate(true);
         LinearLayout.LayoutParams pbParams = new LinearLayout.LayoutParams(400, 12);
@@ -371,7 +294,6 @@ public class MainActivity extends Activity {
         mProgressBar.setLayoutParams(pbParams);
         mSplashLayout.addView(mProgressBar);
 
-        // Status Text
         mStatusText = new TextView(this);
         mStatusText.setText("Loading Intelligence Core...");
         mStatusText.setTextSize(12);
@@ -380,41 +302,22 @@ public class MainActivity extends Activity {
         mSplashLayout.addView(mStatusText);
     }
 
-    private void showErrorFallback(String message) {
-        if (mStatusText != null) {
-            mStatusText.setText("Network unavailable. Tap to launch offline core.");
+    private void startLocalServerAndLoad() {
+        try {
+            mServer = new LocalAssetServer(getAssets());
+            mServer.start();
+            final String url = "http://127.0.0.1:" + mServer.getPort() + "/index.html";
+            mWebView.loadUrl(url);
+        } catch (Exception e) {
+            mWebView.loadUrl("file:///android_asset/www/index.html");
         }
-        if (mProgressBar != null) {
-            mProgressBar.setVisibility(View.GONE);
-        }
-        Button retryButton = new Button(this);
-        retryButton.setText("Launch Offline Core");
-        retryButton.setBackgroundColor(Color.parseColor("#10B981"));
-        retryButton.setTextColor(Color.BLACK);
-        retryButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                mProgressBar.setVisibility(View.VISIBLE);
-                mWebView.loadUrl(OFFLINE_URL);
-            }
-        });
-        mSplashLayout.addView(retryButton);
     }
 
-    private void loadApp() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        boolean isConnected = false;
-        if (cm != null) {
-            NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
-            isConnected = activeNetwork != null && activeNetwork.isConnected();
-        }
-
-        if (isConnected) {
-            if (mStatusText != null) mStatusText.setText("Connecting to RARE Live Core...");
-            mWebView.loadUrl(CLOUD_URL);
-        } else {
-            if (mStatusText != null) mStatusText.setText("Launching Offline Autonomous Core...");
-            mWebView.loadUrl(OFFLINE_URL);
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mServer != null) {
+            mServer.stop();
         }
     }
 
@@ -424,6 +327,133 @@ public class MainActivity extends Activity {
             mWebView.goBack();
         } else {
             super.onBackPressed();
+        }
+    }
+
+    // --- Embedded Lightweight Local HTTP Server ---
+    private static class LocalAssetServer implements Runnable {
+        private final AssetManager mAssetManager;
+        private ServerSocket mServerSocket;
+        private int mPort;
+        private volatile boolean mRunning = false;
+        private Thread mThread;
+
+        public LocalAssetServer(AssetManager assetManager) throws IOException {
+            mAssetManager = assetManager;
+            mServerSocket = new ServerSocket(0);
+            mPort = mServerSocket.getLocalPort();
+        }
+
+        public int getPort() {
+            return mPort;
+        }
+
+        public void start() {
+            mRunning = true;
+            mThread = new Thread(this);
+            mThread.setDaemon(true);
+            mThread.start();
+        }
+
+        public void stop() {
+            mRunning = false;
+            try {
+                if (mServerSocket != null) mServerSocket.close();
+            } catch (IOException ignored) {}
+        }
+
+        @Override
+        public void run() {
+            while (mRunning) {
+                try {
+                    Socket socket = mServerSocket.accept();
+                    handleClient(socket);
+                } catch (IOException e) {
+                    if (!mRunning) break;
+                }
+            }
+        }
+
+        private void handleClient(final Socket socket) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        InputStream in = socket.getInputStream();
+                        OutputStream out = socket.getOutputStream();
+
+                        byte[] buffer = new byte[2048];
+                        int read = in.read(buffer);
+                        if (read <= 0) {
+                            socket.close();
+                            return;
+                        }
+                        String request = new String(buffer, 0, read);
+                        String[] lines = request.split("\r\n");
+                        if (lines.length == 0) {
+                            socket.close();
+                            return;
+                        }
+                        String[] parts = lines[0].split(" ");
+                        if (parts.length < 2) {
+                            socket.close();
+                            return;
+                        }
+                        String rawPath = parts[1];
+                        if (rawPath.contains("?")) {
+                            rawPath = rawPath.substring(0, rawPath.indexOf("?"));
+                        }
+                        if (rawPath.equals("/") || rawPath.isEmpty()) {
+                            rawPath = "/index.html";
+                        }
+                        String assetPath = "www" + (rawPath.startsWith("/") ? rawPath : "/" + rawPath);
+
+                        try {
+                            InputStream assetStream = mAssetManager.open(assetPath);
+                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                            byte[] chunk = new byte[8192];
+                            int bytesRead;
+                            while ((bytesRead = assetStream.read(chunk)) != -1) {
+                                baos.write(chunk, 0, bytesRead);
+                            }
+                            assetStream.close();
+                            byte[] body = baos.toByteArray();
+
+                            String mime = getMimeType(assetPath);
+                            String header = "HTTP/1.1 200 OK\r\n" +
+                                    "Content-Type: " + mime + "\r\n" +
+                                    "Content-Length: " + body.length + "\r\n" +
+                                    "Access-Control-Allow-Origin: *\r\n" +
+                                    "Connection: close\r\n\r\n";
+                            out.write(header.getBytes("UTF-8"));
+                            out.write(body);
+                            out.flush();
+                        } catch (IOException notFound) {
+                            String err = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                            out.write(err.getBytes("UTF-8"));
+                            out.flush();
+                        }
+                        socket.close();
+                    } catch (Exception ignored) {
+                        try { socket.close(); } catch (Exception ignore2) {}
+                    }
+                }
+            }).start();
+        }
+
+        private static String getMimeType(String path) {
+            String lower = path.toLowerCase();
+            if (lower.endsWith(".html")) return "text/html; charset=utf-8";
+            if (lower.endsWith(".js")) return "application/javascript; charset=utf-8";
+            if (lower.endsWith(".css")) return "text/css; charset=utf-8";
+            if (lower.endsWith(".json") || lower.endsWith(".webmanifest")) return "application/json";
+            if (lower.endsWith(".png")) return "image/png";
+            if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+            if (lower.endsWith(".svg")) return "image/svg+xml";
+            if (lower.endsWith(".ico")) return "image/x-icon";
+            if (lower.endsWith(".woff2")) return "font/woff2";
+            if (lower.endsWith(".woff")) return "font/woff";
+            return "application/octet-stream";
         }
     }
 }
@@ -442,7 +472,7 @@ ecj -proc:none -cp "$ANDROID_JAR" -source 1.8 -target 1.8 -d "$BUILD_DIR/bin/cla
   "$BUILD_DIR/src/com/rare/ai/intelligence/R.java" \
   "$BUILD_DIR/src/com/rare/ai/intelligence/MainActivity.java"
 
-echo "=== [7/8] Converting to Dalvik classes.dex ==="
+echo "=== [7/8] Converting Bytecode to Dalvik classes.dex ==="
 dalvik-exchange --dex --output="$BUILD_DIR/bin/classes.dex" "$BUILD_DIR/bin/classes"
 
 echo "=== [8/8] Packaging, Aligning & Signing Standalone Release APK ==="
