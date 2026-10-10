@@ -35,5 +35,111 @@
         "timestamp": "2026-10-10T04:18:00.682Z"
       }
     ]
+  },
+  {
+    "id": "conv_1791611115012",
+    "title": "New Chat",
+    "created_at": "2026-10-10T05:45:15.012Z",
+    "messages": [
+      {
+        "id": "msg_1791611115012",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T05:45:15.012Z"
+      }
+    ]
+  },
+  {
+    "id": "conv_1791611115529",
+    "title": "New Chat",
+    "created_at": "2026-10-10T05:45:15.529Z",
+    "messages": [
+      {
+        "id": "msg_1791611115529",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T05:45:15.529Z"
+      }
+    ]
+  },
+  {
+    "id": "conv_1791611564329",
+    "title": "New Chat",
+    "created_at": "2026-10-10T05:52:44.329Z",
+    "messages": [
+      {
+        "id": "msg_1791611564329",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T05:52:44.329Z"
+      }
+    ]
+  },
+  {
+    "id": "conv_1791611564606",
+    "title": "New Chat",
+    "created_at": "2026-10-10T05:52:44.606Z",
+    "messages": [
+      {
+        "id": "msg_1791611564606",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T05:52:44.606Z"
+      }
+    ]
+  },
+  {
+    "id": "conv_1791612010673",
+    "title": "New Chat",
+    "created_at": "2026-10-10T06:00:10.673Z",
+    "messages": [
+      {
+        "id": "msg_1791612010673",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T06:00:10.673Z"
+      }
+    ]
+  },
+  {
+    "id": "conv_1791612010982",
+    "title": "New Chat",
+    "created_at": "2026-10-10T06:00:10.982Z",
+    "messages": [
+      {
+        "id": "msg_1791612010982",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T06:00:10.982Z"
+      }
+    ]
+  },
+  {
+    "id": "conv_1791613267619",
+    "title": "User1 Work Chat",
+    "userId": "user1@gmail.com",
+    "created_at": "2026-10-10T06:21:07.619Z",
+    "messages": [
+      {
+        "id": "msg_1791613267620",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T06:21:07.620Z"
+      }
+    ]
+  },
+  {
+    "id": "conv_1791613267636",
+    "title": "User2 Private Chat",
+    "userId": "user2@gmail.com",
+    "created_at": "2026-10-10T06:21:07.636Z",
+    "messages": [
+      {
+        "id": "msg_1791613267636",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T06:21:07.636Z"
+      }
+    ]
   }
 ]

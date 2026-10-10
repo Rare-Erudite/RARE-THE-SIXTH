@@ -21,6 +21,8 @@ import {
   Laptop,
   Trash2,
   Save,
+  Copy,
+  Share2,
   BrainCircuit,
   Lock,
   Unlock,
@@ -67,7 +69,8 @@ import { ImageStudioWorkspaceView } from './ImageStudioWorkspaceView';
 import { DownloadAppModal } from './DownloadAppModal';
 import { UpdateModal, AppUpdate } from './UpdateModal';
 import { DeveloperAuthModal } from './DeveloperAuthModal';
-import { AuthModal, UserAccount } from './AuthModal';
+import { AuthModal, UserAccount, getUserInitials } from './AuthModal';
+import { ShareChatModal } from './ShareChatModal';
 
 // Types
 export type AgentRole =
@@ -247,6 +250,8 @@ export default function App() {
 
   // User Account & Authentication Modal state (Sign In / Sign Up)
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'default' | 'google' | 'outlook' | 'switch'>('default');
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     try {
       const saved = localStorage.getItem('rare_user_account');
@@ -255,6 +260,9 @@ export default function App() {
       return null;
     }
   });
+
+  // Full Conversation Share Modal state
+  const [shareModalData, setShareModalData] = useState<{ id: string; title: string; messages?: ChatMessage[] } | null>(null);
 
   // Download & Dual-Channel OTA Update state
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
@@ -300,33 +308,49 @@ export default function App() {
     }
   };
 
-  const loadConversations = async (search?: string) => {
+  const loadConversations = async (search?: string, userToQuery = currentUser) => {
     const q = search !== undefined ? search : chatSearchQuery;
-    const url = q && q.trim()
-      ? `/api/conversations?search=${encodeURIComponent(q.trim())}`
-      : '/api/conversations';
+    const userKey = userToQuery?.email || userToQuery?.phone || 'guest';
+    const params = new URLSearchParams();
+    if (q && q.trim()) params.set('search', q.trim());
+    params.set('userId', userKey);
+
+    const url = `/api/conversations?${params.toString()}`;
     const data = await safeFetch<Conversation[]>(url);
     if (data) {
       setConversations(data);
+      if (data.length > 0) {
+        if (!activeConvId || !data.some((c) => c.id === activeConvId)) {
+          setActiveConvId(data[0].id);
+        }
+      }
       return data;
     }
     return [];
   };
 
-  // Fresh initial startup: Always start on a clean fresh chat session
+  // Sync chats immediately when user logs in, signs out, or switches account
+  useEffect(() => {
+    loadConversations('', currentUser);
+  }, [currentUser?.email, currentUser?.phone, currentUser?.id]);
+
+  // Fresh initial startup
   useEffect(() => {
     const init = async () => {
       fetchHealthAndSettings();
       checkForUpdates(false);
-      const existing = await loadConversations();
-      // On app reload or fresh open, initialize with a new chat session immediately
-      const newChat = await safePost<Conversation>('/api/conversations', {
-        title: 'New Chat',
-      });
-      if (newChat) {
-        setConversations((prev) => [newChat, ...prev.filter((c) => c.id !== newChat.id)]);
-        setActiveConvId(newChat.id);
-      } else if (existing && existing.length > 0) {
+      const existing = await loadConversations('', currentUser);
+      if (!existing || existing.length === 0) {
+        const userKey = currentUser?.email || currentUser?.phone || 'guest';
+        const newChat = await safePost<Conversation>('/api/conversations', {
+          title: 'New Chat',
+          userId: userKey,
+        });
+        if (newChat) {
+          setConversations([newChat]);
+          setActiveConvId(newChat.id);
+        }
+      } else {
         setActiveConvId(existing[0].id);
       }
     };
@@ -351,8 +375,10 @@ export default function App() {
   };
 
   const handleNewChat = async () => {
+    const userKey = currentUser?.email || currentUser?.phone || 'guest';
     const newChat = await safePost<Conversation>('/api/conversations', {
       title: 'New Chat',
+      userId: userKey,
     });
     if (newChat) {
       setConversations((prev) => [newChat, ...prev.filter((c) => c.id !== newChat.id)]);
@@ -660,6 +686,19 @@ export default function App() {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      setShareModalData({ id: c.id, title: c.title, messages: c.messages });
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onTouchStart={(e) => e.stopPropagation()}
+                                    className="p-1.5 sm:p-1 rounded text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/15 active:text-indigo-300 active:scale-95 transition"
+                                    title="Share Full Chat Sheet"
+                                  >
+                                    <Share2 className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                       handleStartRename(c, e);
                                     }}
                                     onPointerDown={(e) => e.stopPropagation()}
@@ -707,8 +746,174 @@ export default function App() {
           </div>
         </div>
 
-        {/* Lower Part of Sidebar: Settings pushed down */}
-        <div className={`p-3.5 border-t ${t.cardBorder} ${t.cardSub} space-y-2.5`}>
+        {/* Lower Part of Sidebar: Account Profile + Settings pushed down */}
+        <div className={`p-3 border-t ${t.cardBorder} ${t.cardSub} space-y-2 relative`}>
+          {/* User Account Initials Badge & Profile Row near Settings */}
+          {currentUser ? (
+            <div className="relative">
+              <button
+                onClick={() => setAccountMenuOpen((prev) => !prev)}
+                className={`w-full flex items-center justify-between p-2 rounded-xl transition border text-left group ${
+                  accountMenuOpen
+                    ? 'bg-indigo-500/20 border-indigo-500/50 shadow-sm'
+                    : 'bg-white/5 border-white/10 hover:bg-white/10'
+                }`}
+                title="Account options: Switch account, sign out, manage profile"
+              >
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm relative"
+                    style={{
+                      backgroundColor:
+                        currentUser.provider === 'google'
+                          ? '#4285F4'
+                          : currentUser.provider === 'outlook'
+                          ? '#0078D4'
+                          : '#6366F1',
+                    }}
+                  >
+                    <span>{getUserInitials(currentUser)}</span>
+                    <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#03040A]" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white group-hover:text-indigo-300 transition truncate">
+                      {currentUser.name}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono truncate">
+                      {currentUser.email || currentUser.phone}
+                    </div>
+                  </div>
+                </div>
+                <MoreVertical className="w-3.5 h-3.5 text-slate-400 group-hover:text-white shrink-0 ml-1" />
+              </button>
+
+              {/* Account Options Popover */}
+              {accountMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setAccountMenuOpen(false)}
+                  />
+                  <div
+                    className={`absolute bottom-full left-0 right-0 mb-2 z-50 ${t.card} border ${t.cardBorder} rounded-xl p-3 shadow-2xl space-y-2 animate-in fade-in zoom-in-95 duration-150`}
+                  >
+                    {/* Header in Popover */}
+                    <div className="flex items-center space-x-2.5 pb-2 border-b border-white/5">
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm"
+                        style={{
+                          backgroundColor:
+                            currentUser.provider === 'google'
+                              ? '#4285F4'
+                              : currentUser.provider === 'outlook'
+                              ? '#0078D4'
+                              : '#6366F1',
+                        }}
+                      >
+                        {getUserInitials(currentUser)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
+                        <div className="text-[10px] text-slate-400 font-mono truncate">
+                          {currentUser.email || currentUser.phone}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Popover Actions */}
+                    <div className="space-y-1">
+                      {/* Switch Google Account */}
+                      <button
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          setAuthModalMode('google');
+                          setAuthModalOpen(true);
+                        }}
+                        className="w-full flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-white/10 hover:text-white transition"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z" />
+                          <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z" />
+                          <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12 0 12s.7 2.3 1.9 4.7l3.7-1.9z" />
+                          <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z" />
+                        </svg>
+                        <span>Switch Google Account</span>
+                      </button>
+
+                      {/* Switch Outlook Account */}
+                      <button
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          setAuthModalMode('outlook');
+                          setAuthModalOpen(true);
+                        }}
+                        className="w-full flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-white/10 hover:text-white transition"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                          <path fill="#F25022" d="M1 1h10v10H1z" />
+                          <path fill="#7FBA00" d="M13 1h10v10H13z" />
+                          <path fill="#00A4EF" d="M1 13h10v10H1z" />
+                          <path fill="#FFB900" d="M13 13h10v10H1z" />
+                        </svg>
+                        <span>Switch Outlook Account</span>
+                      </button>
+
+                      {/* Other Sign-In / Account options */}
+                      <button
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          setAuthModalMode('default');
+                          setAuthModalOpen(true);
+                        }}
+                        className="w-full flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-white/10 hover:text-white transition"
+                      >
+                        <Users className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                        <span>All Sign-In Options...</span>
+                      </button>
+
+                      <div className="h-px bg-white/5 my-1" />
+
+                      {/* Sign Out */}
+                      <button
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          setCurrentUser(null);
+                          localStorage.removeItem('rare_user_account');
+                        }}
+                        className="w-full flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-300 hover:bg-rose-500/20 transition"
+                      >
+                        <LogOut className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setAuthModalMode('default');
+                setAuthModalOpen(true);
+              }}
+              className="w-full flex items-center justify-between p-2 rounded-xl transition border bg-white/5 border-white/10 hover:bg-white/10 text-left group"
+              title="Click to sign in with Google, Outlook, Email, or Phone"
+            >
+              <div className="flex items-center space-x-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-slate-700/60 flex items-center justify-center font-bold text-xs text-slate-300 shrink-0">
+                  RA
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-white group-hover:text-indigo-300 transition">
+                    Guest Account
+                  </div>
+                  <div className="text-[10px] text-slate-400">Click to Sign In</div>
+                </div>
+              </div>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-white shrink-0" />
+            </button>
+          )}
+
           {/* Settings Button */}
           <button
             onClick={() => {
@@ -803,34 +1008,30 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-2 sm:space-x-2.5">
-            {/* Login / Sign Up Account Header Button */}
-            <button
-              onClick={() => setAuthModalOpen(true)}
-              className={`px-2.5 py-1 rounded-full text-xs flex items-center space-x-1.5 transition border ${
-                currentUser
-                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/25'
-                  : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:text-white'
-              }`}
-              title={currentUser ? `Logged in as ${currentUser.name}` : 'Login / Sign Up (Google, Outlook, Email, Phone)'}
-            >
-              <Users className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="font-semibold">
-                {currentUser ? (
-                  <span className="max-w-[80px] sm:max-w-[120px] truncate inline-block align-bottom">{currentUser.name}</span>
-                ) : (
-                  'Login / Sign Up'
-                )}
-              </span>
-            </button>
+            {/* Login / Sign Up Account Header Button — ONLY shown when user is NOT signed in */}
+            {!currentUser && (
+              <button
+                onClick={() => {
+                  setAuthModalMode('default');
+                  setAuthModalOpen(true);
+                }}
+                className="px-2.5 py-1 rounded-full text-xs flex items-center space-x-1.5 transition border bg-indigo-500/15 border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/25 font-semibold"
+                title="Login / Sign Up (Google, Outlook, Email, Phone)"
+              >
+                <Users className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Login / Sign Up</span>
+              </button>
+            )}
 
-            {/* Install & Share App Header Button */}
+            {/* Phone Icon: Download Android APK & Install to Phone */}
             <button
               onClick={() => setDownloadModalOpen(true)}
-              className="px-2.5 py-1 rounded-full text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 flex items-center space-x-1.5 transition shadow-xs"
-              title="Download APK, install to phone, or share via Xender"
+              className="px-2.5 sm:px-3 py-1 rounded-full text-xs bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 active:scale-95 flex items-center space-x-1.5 transition shadow-xs cursor-pointer"
+              title="Download Real Android APK, install to phone, or share via Xender"
+              aria-label="Download Android APK and install to phone"
             >
-              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline font-semibold">Install App</span>
+              <Smartphone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="font-semibold text-emerald-300">Get APK / Phone App</span>
             </button>
 
             {/* Dynamic Update Notification Pill */}
@@ -986,6 +1187,7 @@ export default function App() {
         t={t}
         isOpen={authModalOpen}
         currentUser={currentUser}
+        initialMode={authModalMode}
         onClose={() => setAuthModalOpen(false)}
         onLoginSuccess={(user) => {
           setCurrentUser(user);
@@ -1012,6 +1214,19 @@ export default function App() {
         }}
         onClose={() => setShowDevModal(false)}
       />
+
+      {/* Share Chat Sheet Modal */}
+      {shareModalData && (
+        <ShareChatModal
+          t={t}
+          isOpen={!!shareModalData}
+          onClose={() => setShareModalData(null)}
+          conversationId={shareModalData.id}
+          conversationTitle={shareModalData.title}
+          assistantName={assistantName}
+          preloadedMessages={shareModalData.messages}
+        />
+      )}
     </div>
   );
 }
@@ -2372,13 +2587,161 @@ function CleanChatWorkspaceView({
     };
   }, []);
 
-  const speakText = (text: string) => {
+  // Message interaction states: copy, speak, edit, delete, context menu, and whole chat share
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState<string>('');
+  const [contextMenuMsg, setContextMenuMsg] = useState<ChatMessage | null>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const longPressTimerRef = useRef<any>(null);
+
+  const showToast = (txt: string) => {
+    setToastMessage(txt);
+    setTimeout(() => setToastMessage(null), 2400);
+  };
+
+  const handleCopyText = async (text: string, msgId: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMsgId(msgId);
+      showToast('Copied to clipboard!');
+      setTimeout(() => setCopiedMsgId(null), 2000);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopiedMsgId(msgId);
+      showToast('Copied to clipboard!');
+      setTimeout(() => setCopiedMsgId(null), 2000);
+    }
+  };
+
+  const handleShareMessage = async (msg: ChatMessage) => {
+    const title = msg.role === 'user' ? 'My Message' : `${assistantName} Response`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title,
+          text: msg.content,
+        });
+        showToast('Shared!');
+        return;
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+    // Fallback: Copy to clipboard
+    handleCopyText(msg.content, msg.id);
+    showToast('Copied message text to clipboard for sharing!');
+  };
+
+  const handleToggleSpeak = (msgId: string, text: string) => {
+    if (!('speechSynthesis' in window)) {
+      showToast('Speech synthesis not supported on this device');
+      return;
+    }
+    if (speakingMsgId === msgId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const clean = text.replace(/[*#`_\[\]]/g, '').trim();
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1.05;
+    utterance.onend = () => setSpeakingMsgId(null);
+    utterance.onerror = () => setSpeakingMsgId(null);
+    setSpeakingMsgId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const speakText = (text: string, msgId?: string) => {
     if (!voiceEnabled || !('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
     const clean = text.replace(/[*#`_\[\]]/g, '').trim();
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = 1.05;
+    if (msgId) {
+      setSpeakingMsgId(msgId);
+      utterance.onend = () => setSpeakingMsgId(null);
+      utterance.onerror = () => setSpeakingMsgId(null);
+    }
     window.speechSynthesis.speak(utterance);
+  };
+
+  const handleStartEdit = (msg: ChatMessage) => {
+    setEditingMsgId(msg.id);
+    setEditContent(msg.content);
+    setContextMenuMsg(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMsgId(null);
+    setEditContent('');
+  };
+
+  const handleSaveEdit = async (msgId: string, resend: boolean = false) => {
+    const trimmed = editContent.trim();
+    if (!trimmed || !activeConvId) {
+      setEditingMsgId(null);
+      return;
+    }
+
+    try {
+      const res = await safeFetch<any>(`/api/conversations/${activeConvId}/messages/${msgId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: trimmed }),
+      });
+
+      if (res && res.message) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msgId ? { ...m, content: trimmed } : m))
+        );
+        showToast('Message updated successfully');
+      }
+    } catch (e) {
+      console.warn('Failed to update message:', e);
+    } finally {
+      setEditingMsgId(null);
+    }
+
+    if (resend) {
+      handleSend(trimmed);
+    }
+  };
+
+  const handleDeleteMessage = async (msgId: string) => {
+    if (!activeConvId) return;
+    try {
+      await safeFetch(`/api/conversations/${activeConvId}/messages/${msgId}`, {
+        method: 'DELETE',
+      });
+      setMessages((prev) => prev.filter((m) => m.id !== msgId));
+      showToast('Message deleted');
+      setContextMenuMsg(null);
+    } catch (e) {
+      console.warn('Failed to delete message:', e);
+    }
+  };
+
+  const handleTouchStartMsg = (msg: ChatMessage) => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      setContextMenuMsg(msg);
+    }, 450);
+  };
+
+  const handleTouchEndMsg = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
   };
 
   const handleSaveTitle = async (e?: React.FormEvent) => {
@@ -2740,6 +3103,17 @@ function CleanChatWorkspaceView({
             </button>
           )}
 
+          {/* Share Entire Chat Button */}
+          <button
+            type="button"
+            onClick={() => setShareModalOpen(true)}
+            className={`p-2 rounded-xl ${t.cardSub} border ${t.cardBorder} text-slate-400 hover:text-indigo-300 hover:border-indigo-500/40 active:scale-95 transition flex items-center space-x-1.5`}
+            title="Share Entire Chat (Full Sheet / Document / Native Apps)"
+          >
+            <Share2 className="w-4 h-4 text-indigo-400" />
+            <span className="hidden sm:inline text-xs font-semibold">Share Chat</span>
+          </button>
+
           {/* New Chat Button */}
           {onNewChat && (
             <button
@@ -2816,20 +3190,11 @@ function CleanChatWorkspaceView({
           const act = msg.actionDetected;
 
           return (
-            <div key={msg.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-4xl mx-auto w-full`}>
+            <div key={msg.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-4xl mx-auto w-full group/msg`}>
               <div className={`flex items-center space-x-2 mb-1 text-[11px] ${t.textDim}`}>
                 <span className="font-semibold">{isUser ? 'You' : assistantName}</span>
                 <span>•</span>
                 <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                {!isUser && (
-                  <button
-                    onClick={() => speakText(msg.content)}
-                    className="hover:text-white transition p-0.5"
-                    title="Read Aloud"
-                  >
-                    <Volume2 className="w-3 h-3 text-slate-400 hover:text-emerald-400" />
-                  </button>
-                )}
               </div>
 
               {/* Thought Drawer */}
@@ -2843,16 +3208,190 @@ function CleanChatWorkspaceView({
                 </div>
               )}
 
-              {/* Message Content Bubble */}
-              <div
-                className={`max-w-2xl px-4 py-3 rounded-2xl text-xs leading-relaxed whitespace-pre-wrap ${
-                  isUser
-                    ? `${t.accentBg} text-white rounded-br-none shadow-md`
-                    : `${t.cardSub} ${t.textPrimary} border ${t.cardBorder} rounded-bl-none shadow-md`
-                }`}
-              >
-                {msg.content}
-              </div>
+              {/* Message Content Bubble / Inline Edit Form */}
+              {isUser && editingMsgId === msg.id ? (
+                <div className="w-full max-w-2xl bg-slate-900 border border-indigo-500/60 rounded-2xl p-3.5 space-y-3 shadow-xl">
+                  <div className="flex items-center justify-between text-xs text-indigo-300 font-semibold">
+                    <span className="flex items-center space-x-1.5">
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Editing Your Message</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCancelEdit}
+                      className="text-slate-400 hover:text-white p-1"
+                      title="Cancel"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-indigo-500 min-h-[90px] resize-y"
+                    autoFocus
+                    rows={3}
+                  />
+                  <div className="flex items-center justify-end space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleCancelEdit}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveEdit(msg.id, false)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 text-white hover:bg-white/20 transition flex items-center space-x-1"
+                    >
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Save</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveEdit(msg.id, true)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${t.accentBg} ${t.accentBgHover} text-white shadow-sm transition flex items-center space-x-1`}
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Save & Resend</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  onTouchStart={() => isUser ? handleTouchStartMsg(msg) : undefined}
+                  onTouchEnd={handleTouchEndMsg}
+                  onTouchMove={handleTouchEndMsg}
+                  onContextMenu={(e) => {
+                    if (isUser) {
+                      e.preventDefault();
+                      setContextMenuMsg(msg);
+                    }
+                  }}
+                  className={`max-w-2xl px-4 py-3 rounded-2xl text-xs leading-relaxed whitespace-pre-wrap break-words select-text relative transition shadow-md ${
+                    isUser
+                      ? `${t.accentBg} text-white rounded-br-none`
+                      : `${t.cardSub} ${t.textPrimary} border ${t.cardBorder} rounded-bl-none`
+                  }`}
+                  title={isUser ? 'Long press or right click for message options' : undefined}
+                >
+                  {msg.content}
+                </div>
+              )}
+
+              {/* Action Toolbar Underneath Each Message: Copy, Share, Read Aloud, Edit, Delete */}
+              {editingMsgId !== msg.id && (
+                <div
+                  className={`mt-1.5 flex items-center space-x-1 text-[11px] ${
+                    isUser ? 'justify-end' : 'justify-start'
+                  }`}
+                >
+                  {isUser ? (
+                    /* User Input Actions: Edit, Copy, Share, Delete */
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleStartEdit(msg)}
+                        className="flex items-center space-x-1 px-2 py-0.5 rounded-lg text-slate-400 hover:text-indigo-300 hover:bg-indigo-500/10 active:scale-95 transition"
+                        title="Edit what you sent"
+                      >
+                        <Edit2 className="w-3 h-3 text-slate-400" />
+                        <span className="text-[10px]">Edit</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(msg.content, msg.id)}
+                        className={`flex items-center space-x-1 px-2 py-0.5 rounded-lg active:scale-95 transition ${
+                          copiedMsgId === msg.id
+                            ? 'text-emerald-300 bg-emerald-500/15'
+                            : 'text-slate-400 hover:text-white hover:bg-white/10'
+                        }`}
+                        title="Copy text"
+                      >
+                        {copiedMsgId === msg.id ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-slate-400" />
+                        )}
+                        <span className="text-[10px]">{copiedMsgId === msg.id ? 'Copied' : 'Copy'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleShareMessage(msg)}
+                        className="flex items-center space-x-1 px-2 py-0.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 active:scale-95 transition"
+                        title="Share this text"
+                      >
+                        <Share2 className="w-3 h-3 text-slate-400" />
+                        <span className="text-[10px]">Share</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMessage(msg.id)}
+                        className="flex items-center space-x-1 px-2 py-0.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/15 active:scale-95 transition"
+                        title="Delete what you sent"
+                      >
+                        <Trash2 className="w-3 h-3 text-slate-400" />
+                        <span className="text-[10px]">Delete</span>
+                      </button>
+                    </>
+                  ) : (
+                    /* AI Output Actions: Read Aloud (volume icon), Copy, Share */
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSpeak(msg.id, msg.content)}
+                        className={`flex items-center space-x-1 px-2 py-0.5 rounded-lg active:scale-95 transition ${
+                          speakingMsgId === msg.id
+                            ? 'text-purple-300 bg-purple-500/20 font-semibold border border-purple-500/30'
+                            : 'text-slate-400 hover:text-purple-300 hover:bg-purple-500/10'
+                        }`}
+                        title={speakingMsgId === msg.id ? 'Stop audio' : 'Read aloud with volume'}
+                      >
+                        {speakingMsgId === msg.id ? (
+                          <VolumeX className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5 text-slate-400 hover:text-purple-400" />
+                        )}
+                        <span className="text-[10px]">
+                          {speakingMsgId === msg.id ? 'Stop Audio' : 'Read Aloud'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(msg.content, msg.id)}
+                        className={`flex items-center space-x-1 px-2 py-0.5 rounded-lg active:scale-95 transition ${
+                          copiedMsgId === msg.id
+                            ? 'text-emerald-300 bg-emerald-500/15'
+                            : 'text-slate-400 hover:text-white hover:bg-white/10'
+                        }`}
+                        title="Copy response"
+                      >
+                        {copiedMsgId === msg.id ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-slate-400" />
+                        )}
+                        <span className="text-[10px]">{copiedMsgId === msg.id ? 'Copied' : 'Copy'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleShareMessage(msg)}
+                        className="flex items-center space-x-1 px-2 py-0.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 active:scale-95 transition"
+                        title="Share response"
+                      >
+                        <Share2 className="w-3 h-3 text-slate-400" />
+                        <span className="text-[10px]">Share</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Embedded Project Build Action Card */}
               {act?.type === 'project_build' && act.data && (
@@ -3117,6 +3656,115 @@ function CleanChatWorkspaceView({
           </button>
         </form>
       </div>
+
+      {/* Mobile Long-Press / Options Modal */}
+      {contextMenuMsg && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-3 sm:p-4"
+          onClick={() => setContextMenuMsg(null)}
+        >
+          <div
+            className={`w-full max-w-sm ${t.card} border ${t.cardBorder} rounded-2xl p-4 space-y-3 shadow-2xl animate-in fade-in slide-in-from-bottom-4`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <div className="text-xs font-bold text-slate-300">Message Options</div>
+              <button
+                type="button"
+                onClick={() => setContextMenuMsg(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              {contextMenuMsg.role === 'user' && (
+                <button
+                  type="button"
+                  onClick={() => handleStartEdit(contextMenuMsg)}
+                  className="w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-white/10 transition"
+                >
+                  <Edit2 className="w-4 h-4 text-indigo-400" />
+                  <span>Edit Message</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleCopyText(contextMenuMsg.content, contextMenuMsg.id);
+                  setContextMenuMsg(null);
+                }}
+                className="w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-white/10 transition"
+              >
+                <Copy className="w-4 h-4 text-emerald-400" />
+                <span>Copy Text</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleShareMessage(contextMenuMsg);
+                  setContextMenuMsg(null);
+                }}
+                className="w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-white/10 transition"
+              >
+                <Share2 className="w-4 h-4 text-blue-400" />
+                <span>Share Message</span>
+              </button>
+
+              {contextMenuMsg.role === 'assistant' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleToggleSpeak(contextMenuMsg.id, contextMenuMsg.content);
+                    setContextMenuMsg(null);
+                  }}
+                  className="w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-white/10 transition"
+                >
+                  {speakingMsgId === contextMenuMsg.id ? (
+                    <VolumeX className="w-4 h-4 text-purple-400" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 text-purple-400" />
+                  )}
+                  <span>{speakingMsgId === contextMenuMsg.id ? 'Stop Audio' : 'Read Aloud'}</span>
+                </button>
+              )}
+
+              {contextMenuMsg.role === 'user' && (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteMessage(contextMenuMsg.id)}
+                  className="w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-xs font-medium text-rose-300 hover:bg-rose-500/15 transition"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-400" />
+                  <span>Delete Message</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Action Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-slate-900 border border-white/20 text-white text-xs px-3.5 py-2 rounded-xl shadow-2xl flex items-center space-x-2 z-50 animate-in fade-in slide-in-from-bottom-2">
+          <Check className="w-3.5 h-3.5 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Share Chat Sheet Modal for current active conversation */}
+      <ShareChatModal
+        t={t}
+        isOpen={shareModalOpen}
+        onClose={() => setShareModalOpen(false)}
+        conversationId={activeConvId}
+        conversationTitle={convTitle}
+        assistantName={assistantName}
+        preloadedMessages={messages}
+      />
     </div>
   );
 }

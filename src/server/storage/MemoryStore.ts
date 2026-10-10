@@ -209,6 +209,7 @@ export interface ConversationRecord {
   created_at: string;
   messages: ChatMessageRecord[];
   customTitle?: boolean;
+  userId?: string;
 }
 
 export class ConversationStore {
@@ -234,11 +235,12 @@ export class ConversationStore {
         }
       }
 
-      // Default seed conversation
+      // Default seed conversation for guest
       const seedConv: ConversationRecord = {
         id: 'conv_main',
         title: 'General Inquiries',
         created_at: new Date(Date.now() - 3600000).toISOString(),
+        userId: 'guest',
         messages: [
           {
             id: 'msg_1',
@@ -266,8 +268,13 @@ export class ConversationStore {
     }
   }
 
-  public getAll(): ConversationRecord[] {
-    return Array.from(this.conversations.values()).sort(
+  public getAll(userId?: string): ConversationRecord[] {
+    const all = Array.from(this.conversations.values());
+    const filtered = userId && userId.trim()
+      ? all.filter((c) => c.userId === userId || (!c.userId && userId === 'guest'))
+      : all;
+
+    return filtered.sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
   }

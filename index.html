@@ -16,12 +16,84 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <script>
-      // Gracefully handle and suppress Vite dev HMR WebSocket disconnects in iframe/container sandbox
+      // Gracefully handle and mock Vite dev HMR WebSocket in iframe/container sandbox
       (function() {
+        if (typeof window !== 'undefined' && window.WebSocket) {
+          const OrigWebSocket = window.WebSocket;
+          class ViteHmrMockSocket extends EventTarget {
+            static CONNECTING = 0;
+            static OPEN = 1;
+            static CLOSING = 2;
+            static CLOSED = 3;
+
+            constructor(url, protocols) {
+              super();
+              this.url = String(url || '');
+              this.protocol = typeof protocols === 'string' ? protocols : (Array.isArray(protocols) ? protocols[0] : 'vite-hmr');
+              this.readyState = 1; // WebSocket.OPEN
+              this.binaryType = 'blob';
+              this.bufferedAmount = 0;
+              this.extensions = '';
+              setTimeout(() => {
+                const ev = new Event('open');
+                this.dispatchEvent(ev);
+                if (typeof this.onopen === 'function') this.onopen(ev);
+              }, 0);
+            }
+            send() {}
+            close(code = 1000, reason = '') {
+              this.readyState = 3;
+              const ev = new Event('close');
+              this.dispatchEvent(ev);
+              if (typeof this.onclose === 'function') this.onclose(ev);
+            }
+            get onopen() { return this._onopen; }
+            set onopen(fn) { this._onopen = fn; }
+            get onmessage() { return this._onmessage; }
+            set onmessage(fn) { this._onmessage = fn; }
+            get onerror() { return this._onerror; }
+            set onerror(fn) { this._onerror = fn; }
+            get onclose() { return this._onclose; }
+            set onclose(fn) { this._onclose = fn; }
+          }
+
+          function PatchedWebSocket(url, protocols) {
+            const isVite = (typeof protocols === 'string' && (protocols === 'vite-hmr' || protocols === 'vite-ping'))
+              || (Array.isArray(protocols) && protocols.some(function(p) { return typeof p === 'string' && p.includes('vite'); }))
+              || (typeof url === 'string' && (url.includes('vite-hmr') || url.includes('token=') || url.includes('/@vite')));
+            if (isVite) {
+              return new ViteHmrMockSocket(url, protocols);
+            }
+            return new OrigWebSocket(url, protocols);
+          }
+          PatchedWebSocket.prototype = OrigWebSocket.prototype;
+          PatchedWebSocket.CONNECTING = 0;
+          PatchedWebSocket.OPEN = 1;
+          PatchedWebSocket.CLOSING = 2;
+          PatchedWebSocket.CLOSED = 3;
+          window.WebSocket = PatchedWebSocket;
+        }
+
         const isViteWsError = (str) => {
           if (!str) return false;
           const s = String(str);
-          return s.includes('WebSocket') || s.includes('[vite]') || s.includes('closed without opened');
+          return s.includes('WebSocket') || s.includes('[vite]') || s.includes('closed without opened') || s.includes('vite-hmr') || s.includes('GSI_LOGGER');
+        };
+
+        const origConsoleError = console.error;
+        console.error = function(...args) {
+          if (args.some(arg => isViteWsError(arg?.message || arg?.stack || arg))) {
+            return;
+          }
+          origConsoleError.apply(console, args);
+        };
+
+        const origConsoleWarn = console.warn;
+        console.warn = function(...args) {
+          if (args.some(arg => isViteWsError(arg?.message || arg?.stack || arg))) {
+            return;
+          }
+          origConsoleWarn.apply(console, args);
         };
 
         window.addEventListener('error', (event) => {

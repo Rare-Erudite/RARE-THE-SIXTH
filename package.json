@@ -7,6 +7,7 @@
     "dev": "tsx server.ts",
     "start": "node server.ts",
     "build": "vite build",
+    "build:apk": "/bin/bash scripts/build_apk.sh",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",

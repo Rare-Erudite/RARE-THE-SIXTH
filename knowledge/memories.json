@@ -206,5 +206,155 @@
     "importance": 5,
     "source": "user_stated",
     "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791611542625_t9pav",
+    "timestamp": "2026-10-10T05:52:22.625Z",
+    "kind": "fact",
+    "text": "Test tool memory statement",
+    "tags": [
+      "test_tool"
+    ],
+    "importance": 3,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791611544051_v8a16",
+    "timestamp": "2026-10-10T05:52:24.051Z",
+    "kind": "fact",
+    "text": "eval_fact_1791611544051: Deterministic test token: mopsfe",
+    "tags": [
+      "eval_suite",
+      "test_token"
+    ],
+    "importance": 5,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791611966589_ce0nm",
+    "timestamp": "2026-10-10T05:59:26.589Z",
+    "kind": "fact",
+    "text": "Test tool memory statement",
+    "tags": [
+      "test_tool"
+    ],
+    "importance": 3,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791611968000_0b1ig",
+    "timestamp": "2026-10-10T05:59:28.000Z",
+    "kind": "fact",
+    "text": "eval_fact_1791611968000: Deterministic test token: 9p1fx9",
+    "tags": [
+      "eval_suite",
+      "test_token"
+    ],
+    "importance": 5,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791613255326_sdnc0",
+    "timestamp": "2026-10-10T06:20:55.326Z",
+    "kind": "fact",
+    "text": "Test tool memory statement",
+    "tags": [
+      "test_tool"
+    ],
+    "importance": 3,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791613256853_lkt8s",
+    "timestamp": "2026-10-10T06:20:56.853Z",
+    "kind": "fact",
+    "text": "eval_fact_1791613256853: Deterministic test token: d7iazd",
+    "tags": [
+      "eval_suite",
+      "test_token"
+    ],
+    "importance": 5,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791615476950_11bbj",
+    "timestamp": "2026-10-10T06:57:56.950Z",
+    "kind": "fact",
+    "text": "Test tool memory statement",
+    "tags": [
+      "test_tool"
+    ],
+    "importance": 3,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791615478335_e88ny",
+    "timestamp": "2026-10-10T06:57:58.335Z",
+    "kind": "fact",
+    "text": "eval_fact_1791615478335: Deterministic test token: nhh2mq",
+    "tags": [
+      "eval_suite",
+      "test_token"
+    ],
+    "importance": 5,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791616256415_7lnla",
+    "timestamp": "2026-10-10T07:10:56.415Z",
+    "kind": "fact",
+    "text": "Test tool memory statement",
+    "tags": [
+      "test_tool"
+    ],
+    "importance": 3,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791616257843_dsujc",
+    "timestamp": "2026-10-10T07:10:57.843Z",
+    "kind": "fact",
+    "text": "eval_fact_1791616257843: Deterministic test token: 10z370",
+    "tags": [
+      "eval_suite",
+      "test_token"
+    ],
+    "importance": 5,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791638422214_ei100",
+    "timestamp": "2026-10-10T13:20:22.214Z",
+    "kind": "fact",
+    "text": "Test tool memory statement",
+    "tags": [
+      "test_tool"
+    ],
+    "importance": 3,
+    "source": "user_stated",
+    "verifiedByUser": true
+  },
+  {
+    "id": "mem_1791638423849_7kbt2",
+    "timestamp": "2026-10-10T13:20:23.849Z",
+    "kind": "fact",
+    "text": "eval_fact_1791638423849: Deterministic test token: hbglzx",
+    "tags": [
+      "eval_suite",
+      "test_token"
+    ],
+    "importance": 5,
+    "source": "user_stated",
+    "verifiedByUser": true
   }
 ]

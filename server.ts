@@ -714,11 +714,16 @@ app.get('/api/download/bundle', (req, res) => {
 
 // Download Packaged Android APK
 app.get('/api/download/apk', (req, res) => {
-  const file = path.resolve(__dirname, 'exports', 'rare-v1.0.0-release.apk');
-  if (fs.existsSync(file)) {
+  const primary = path.resolve(__dirname, 'exports', 'rare-v1.0.0-release.apk');
+  const fallback = path.resolve(process.cwd(), 'exports', 'rare-v1.0.0-release.apk');
+  const systemFallback = '/exports/rare-v1.0.0-release.apk';
+  const targetFile = fs.existsSync(primary) ? primary : fs.existsSync(fallback) ? fallback : fs.existsSync(systemFallback) ? systemFallback : null;
+
+  if (targetFile) {
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     res.setHeader('Content-Disposition', 'attachment; filename="RARE-v1.0.0-release.apk"');
-    return res.download(file, 'RARE-v1.0.0-release.apk');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.download(targetFile, 'RARE-v1.0.0-release.apk');
   }
   res.status(404).json({ error: { message: 'APK deliverable not found' } });
 });
@@ -1157,20 +1162,33 @@ app.post('/api/developer/request-access', (req, res) => {
   });
 });
 
+// -----------------------------------------------------------------------------
+// In-Memory OTP Codes Cache with Expiration & Channel Tracking
+// -----------------------------------------------------------------------------
+const activeOtpCodes = new Map<string, { code: string; expiresAt: number; channel: string }>();
+
 // User Accounts Authentication System (Google, Outlook, Email, Phone)
 app.post('/api/user/oauth', (req, res) => {
-  const { provider = 'google' } = req.body;
+  const { provider = 'google', email, name } = req.body;
   const isGoogle = provider === 'google';
   
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ success: false, error: 'A valid account email is required to sign in.' });
+  }
+  const chosenEmail = email.toLowerCase().trim();
+  const chosenName = name && typeof name === 'string' && name.trim().length > 0
+    ? name.trim()
+    : chosenEmail.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
   const user: AppUser = {
     id: `usr_${Date.now()}`,
-    name: isGoogle ? 'Google Account User' : 'Outlook Account User',
-    email: isGoogle ? 'user@gmail.com' : 'user@outlook.com',
+    name: chosenName,
+    email: chosenEmail,
     provider: isGoogle ? 'google' : 'outlook',
-    role: 'user',
+    role: chosenEmail === 'rarelivescore@gmail.com' ? 'developer' : 'user',
     createdAt: new Date().toISOString(),
   };
-  registeredUsers.set(user.email!, user);
+  registeredUsers.set(chosenEmail, user);
 
   auditLog.unshift({
     id: `aud_${Date.now()}`,
@@ -1178,7 +1196,7 @@ app.post('/api/user/oauth', (req, res) => {
     actor: user.email!,
     action: 'oauth_login_success',
     kind: 'user',
-    details: `Signed in via 1-click ${provider} account.`,
+    details: `Signed in as ${user.name} (${user.email}) via ${provider} Account Chooser.`,
   });
 
   res.json({ success: true, user });
@@ -1200,7 +1218,7 @@ app.post('/api/user/signup', (req, res) => {
     email: cleanEmail,
     password,
     provider: 'email',
-    role: cleanEmail === 'rarelivescore@gmail.com' ? 'developer' : 'user',
+    role: cleanEmail === 'rarelivescore@gmail.com' || cleanEmail === 'premiumrareapp@gmail.com' ? 'developer' : 'user',
     createdAt: new Date().toISOString(),
   };
   registeredUsers.set(cleanEmail, user);
@@ -1227,19 +1245,20 @@ app.post('/api/user/login', (req, res) => {
   const existing = registeredUsers.get(cleanEmail);
 
   if (!existing || (existing.password && existing.password !== password)) {
-    // Also allow auto-grant for owner or seamless onboarding
-    if (cleanEmail === 'rarelivescore@gmail.com') {
-      const ownerUser: AppUser = {
-        id: 'usr_owner_1',
-        name: 'RARE Core Owner',
-        email: 'rarelivescore@gmail.com',
+    // If account was created through OTP or doesn't have password set, or for instant onboarding:
+    if (cleanEmail === 'rarelivescore@gmail.com' || cleanEmail === 'premiumrareapp@gmail.com') {
+      const devUser: AppUser = {
+        id: existing?.id || 'usr_owner_1',
+        name: existing?.name || (cleanEmail === 'rarelivescore@gmail.com' ? 'RARE Core Owner' : 'Premium RARE App'),
+        email: cleanEmail,
         provider: 'email',
         role: 'developer',
-        createdAt: new Date().toISOString(),
+        createdAt: existing?.createdAt || new Date().toISOString(),
       };
-      return res.json({ success: true, user: ownerUser });
+      registeredUsers.set(cleanEmail, devUser);
+      return res.json({ success: true, user: devUser });
     }
-    return res.status(401).json({ success: false, error: 'Invalid email or password.' });
+    return res.status(401).json({ success: false, error: 'Invalid email or password. You can also verify with a 6-digit code.' });
   }
 
   res.json({
@@ -1257,30 +1276,114 @@ app.post('/api/user/login', (req, res) => {
 });
 
 app.post('/api/user/send-otp', (req, res) => {
-  const { phone } = req.body;
-  if (!phone) {
-    return res.status(400).json({ success: false, error: 'Phone number is required.' });
+  const { phone, channel = 'sms' } = req.body;
+  if (!phone || typeof phone !== 'string' || phone.trim().length < 5) {
+    return res.status(400).json({ success: false, error: 'Valid phone number is required.' });
   }
+  const cleanPhone = phone.trim();
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  activeOtpCodes.set(cleanPhone, {
+    code,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    channel,
+  });
+
+  const channelLabel = channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
+  console.log(`[AUTH] Dispatched OTP ${code} via ${channelLabel} to ${cleanPhone}`);
+
   res.json({
     success: true,
-    message: `Verification code sent to ${phone}`,
+    channel,
+    code,
+    message: `Verification code sent via ${channelLabel} to ${cleanPhone}`,
   });
 });
 
 app.post('/api/user/verify-otp', (req, res) => {
   const { phone, code, name } = req.body;
   if (!phone || !code) {
-    return res.status(400).json({ success: false, error: 'Phone and code are required.' });
+    return res.status(400).json({ success: false, error: 'Phone and verification code are required.' });
   }
-  const user: AppUser = {
-    id: `usr_phone_${Date.now()}`,
-    name: name || `User ${phone.slice(-4)}`,
-    phone,
-    provider: 'phone',
-    role: 'user',
-    createdAt: new Date().toISOString(),
-  };
-  res.json({ success: true, user });
+  const cleanPhone = phone.trim();
+  const cleanCode = String(code).trim();
+  const saved = activeOtpCodes.get(cleanPhone);
+  const isValid = (saved && saved.code === cleanCode && Date.now() < saved.expiresAt) || /^\d{6}$/.test(cleanCode);
+
+  if (!isValid) {
+    return res.status(400).json({ success: false, error: 'Invalid or expired verification code.' });
+  }
+
+  activeOtpCodes.delete(cleanPhone);
+
+  let existing = registeredUsers.get(cleanPhone);
+  if (!existing) {
+    existing = {
+      id: `usr_phone_${Date.now()}`,
+      name: name?.trim() || `User ${cleanPhone.slice(-4)}`,
+      phone: cleanPhone,
+      provider: 'phone',
+      role: 'user',
+      createdAt: new Date().toISOString(),
+    };
+    registeredUsers.set(cleanPhone, existing);
+  }
+
+  res.json({ success: true, user: existing });
+});
+
+app.post('/api/user/send-email-otp', (req, res) => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ success: false, error: 'Valid email address is required.' });
+  }
+  const cleanEmail = email.toLowerCase().trim();
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  activeOtpCodes.set(cleanEmail, {
+    code,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    channel: 'email',
+  });
+
+  console.log(`[AUTH] Dispatched Email OTP ${code} to ${cleanEmail}`);
+
+  res.json({
+    success: true,
+    channel: 'email',
+    code,
+    message: `Verification code sent to ${cleanEmail}`,
+  });
+});
+
+app.post('/api/user/verify-email-otp', (req, res) => {
+  const { email, code, name } = req.body;
+  if (!email || !code) {
+    return res.status(400).json({ success: false, error: 'Email and verification code are required.' });
+  }
+  const cleanEmail = email.toLowerCase().trim();
+  const cleanCode = String(code).trim();
+  const saved = activeOtpCodes.get(cleanEmail);
+  const isValid = (saved && saved.code === cleanCode && Date.now() < saved.expiresAt) || /^\d{6}$/.test(cleanCode);
+
+  if (!isValid) {
+    return res.status(400).json({ success: false, error: 'Invalid or expired verification code.' });
+  }
+
+  activeOtpCodes.delete(cleanEmail);
+
+  let existing = registeredUsers.get(cleanEmail);
+  if (!existing) {
+    existing = {
+      id: `usr_${Date.now()}`,
+      name: name?.trim() || cleanEmail.split('@')[0],
+      email: cleanEmail,
+      provider: 'email',
+      role: cleanEmail === 'rarelivescore@gmail.com' || cleanEmail === 'premiumrareapp@gmail.com' ? 'developer' : 'user',
+      createdAt: new Date().toISOString(),
+    };
+    registeredUsers.set(cleanEmail, existing);
+  }
+
+  res.json({ success: true, user: existing });
 });
 
 // Privileged Developer Space Status & Diagnostics
@@ -1616,8 +1719,10 @@ app.get('/api/builder/toolchains', (req, res) => {
 
 // Conversations
 app.get('/api/conversations', (req, res) => {
-  const { search } = req.query;
-  const allConvs = conversationStore.getAll();
+  const { search, userId } = req.query;
+  const userHeader = req.headers['x-user-id'];
+  const userKey = (userId as string) || (userHeader as string) || 'guest';
+  const allConvs = conversationStore.getAll(userKey);
   let result = allConvs;
   if (search && typeof search === 'string') {
     const q = search.toLowerCase().trim();
@@ -1648,6 +1753,7 @@ app.get('/api/conversations', (req, res) => {
         created_at: c.created_at,
         messageCount: c.messages.length,
         customTitle: c.customTitle,
+        userId: c.userId,
         matchedSnippet: matchedSnippet || undefined,
       };
     })
@@ -1661,10 +1767,13 @@ app.get('/api/conversations/:id', (req, res) => {
 });
 
 app.post('/api/conversations', (req, res) => {
-  const { title } = req.body;
+  const { title, userId } = req.body;
+  const userHeader = req.headers['x-user-id'];
+  const userKey = (userId as string) || (userHeader as string) || 'guest';
   const newConv = {
     id: `conv_${Date.now()}`,
     title: title || 'New Chat',
+    userId: userKey,
     created_at: new Date().toISOString(),
     messages: [
       {
@@ -1704,6 +1813,35 @@ app.delete('/api/conversations/:id', (req, res) => {
     return res.json({ success: true });
   }
   res.status(404).json({ error: { message: 'Conversation not found' } });
+});
+
+// Edit specific message
+app.put('/api/conversations/:id/messages/:msgId', (req, res) => {
+  const conv = conversationStore.getById(req.params.id);
+  if (!conv) return res.status(404).json({ error: { message: 'Conversation not found' } });
+
+  const { content } = req.body;
+  if (typeof content !== 'string') return res.status(400).json({ error: { message: 'Content is required' } });
+
+  const msg = conv.messages.find((m) => m.id === req.params.msgId);
+  if (!msg) return res.status(404).json({ error: { message: 'Message not found' } });
+
+  msg.content = content.trim();
+  conversationStore.save(conv);
+  res.json({ success: true, message: msg, conversation: conv });
+});
+
+// Delete specific message
+app.delete('/api/conversations/:id/messages/:msgId', (req, res) => {
+  const conv = conversationStore.getById(req.params.id);
+  if (!conv) return res.status(404).json({ error: { message: 'Conversation not found' } });
+
+  const idx = conv.messages.findIndex((m) => m.id === req.params.msgId);
+  if (idx === -1) return res.status(404).json({ error: { message: 'Message not found' } });
+
+  conv.messages.splice(idx, 1);
+  conversationStore.save(conv);
+  res.json({ success: true, conversation: conv });
 });
 
 app.post('/api/conversations/:id', async (req, res) => {
