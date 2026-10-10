@@ -13,7 +13,7 @@ export class GeminiCoprocessorProvider implements IModelProvider {
     return {
       id: 'gemini-coprocessor',
       name: 'Gemini Coprocessor (External)',
-      version: 'gemini-3.8-flash',
+      version: 'gemini-3.5-flash / gemini-3.8-flash',
       architecture: 'Remote Cloud Multimodal Transformer',
       type: 'gemini_coprocessor',
       requires_api_key: true,
@@ -21,7 +21,7 @@ export class GeminiCoprocessorProvider implements IModelProvider {
       active: available,
       weights_location: 'Google AI Cloud Infrastructure',
       execution_environment: 'Remote API Endpoint via HTTPS',
-      notes: 'Optional auxiliary coprocessor. Not required for standard RARE core operation or local chat.',
+      notes: 'Auxiliary cloud neural coprocessor. Operates when GEMINI_API_KEY is present; falls back gracefully to deterministic offline engine if unreachable.',
     };
   }
 
@@ -47,28 +47,40 @@ export class GeminiCoprocessorProvider implements IModelProvider {
 
     const systemInstruction = `${options?.systemPrompt || 'You are RARE, a helpful personal assistant and software builder.'}\n\nContext:\n${context || ''}`;
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Gemini API timeout')), 6000)
-    );
+    const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
+    let lastError: any = null;
 
-    const response: any = await Promise.race([
-      ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: options?.temperature ?? 0.7,
-        },
-      }),
-      timeoutPromise,
-    ]);
+    for (const modelId of candidateModels) {
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Gemini API timeout on ${modelId}`)), 7000)
+        );
 
-    const reply = response.text || 'Understood.';
-    return {
-      reply,
-      thought: '[Gemini Cloud Coprocessor] Assisted inference.',
-      modelUsed: 'gemini-3.8-flash',
-      providerType: 'gemini_coprocessor',
-    };
+        const response: any = await Promise.race([
+          ai.models.generateContent({
+            model: modelId,
+            contents: prompt,
+            config: {
+              systemInstruction,
+              temperature: options?.temperature ?? 0.7,
+            },
+          }),
+          timeoutPromise,
+        ]);
+
+        const reply = response.text || 'Understood.';
+        return {
+          reply,
+          thought: `[Gemini Neural Coprocessor: ${modelId}] Remote cloud neural inference verified.`,
+          modelUsed: modelId,
+          providerType: 'gemini_coprocessor',
+        };
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[GeminiCoprocessorProvider] Model ${modelId} failed:`, err?.message || err);
+      }
+    }
+
+    throw lastError || new Error('All Gemini neural models failed or timed out.');
   }
 }

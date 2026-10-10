@@ -153,5 +153,31 @@
         "timestamp": "2026-10-10T06:21:07.636Z"
       }
     ]
+  },
+  {
+    "id": "conv_1791646424023",
+    "title": "Test Verification Chat",
+    "userId": "guest",
+    "created_at": "2026-10-10T15:33:44.023Z",
+    "messages": [
+      {
+        "id": "msg_1791646424023",
+        "role": "assistant",
+        "content": "Hello! I am RARE — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images",
+        "timestamp": "2026-10-10T15:33:44.023Z"
+      },
+      {
+        "id": "msg_1791646427733_u",
+        "role": "user",
+        "content": "Hello RARE, please run a quick status check.",
+        "timestamp": "2026-10-10T15:33:47.733Z"
+      },
+      {
+        "id": "msg_1791646427738_b",
+        "role": "assistant",
+        "content": "Understood. I am processing your request through RARE's native core. Whether you want to discuss ideas, build software, transcribe audio, or manage documents, I am ready to proceed. What specific details would you like to focus on?",
+        "timestamp": "2026-10-10T15:33:47.738Z"
+      }
+    ]
   }
 ]

@@ -65,6 +65,15 @@ export function setBackendUrl(url: string) {
   }
 }
 
+export function isStandaloneMobileApp(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.location.hostname === 'rare.local' ||
+    window.location.protocol === 'file:' ||
+    (window as any).__IS_RARE_APK__ === true
+  );
+}
+
 export function resolveApiUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
@@ -85,10 +94,23 @@ export async function safeFetch<T>(
 ): Promise<T | null> {
   const fullUrl = resolveApiUrl(url);
 
+  // If running inside standalone mobile APK with no remote backend configured, operate in local offline mode
+  if (isStandaloneMobileApp() && !getBackendUrl()) {
+    updateConnectionState(true);
+    return fallback !== undefined ? fallback : null;
+  }
+
   for (let i = 0; i <= retries; i++) {
     try {
       const res = await fetch(fullUrl, options);
+      const contentType = res.headers.get('content-type') || '';
+
       if (res.ok) {
+        if (!contentType.includes('application/json')) {
+          // Guard against HTML bodies being parsed as JSON (e.g. 404/SPA fallbacks returning <!doctype html>)
+          updateConnectionState(false, 'Server returned HTML instead of JSON API response.');
+          return fallback !== undefined ? fallback : null;
+        }
         updateConnectionState(true);
         return (await res.json()) as T;
       } else {

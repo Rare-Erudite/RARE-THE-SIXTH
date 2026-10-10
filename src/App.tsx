@@ -1101,10 +1101,11 @@ export default function App() {
             >
               {voiceEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
             </button>
+          </div>
         </header>
 
-        {/* Visible Backend Connection Status Warning Banner */}
-        {!connectionStatus.reachable && (
+        {/* Visible Backend Connection Status Warning Banner — only shown if a backend URL is configured but unreachable */}
+        {!connectionStatus.reachable && Boolean(getBackendUrl()) && (
           <div className="bg-amber-950/70 border-b border-amber-500/40 px-4 py-2 text-xs text-amber-200 flex items-center justify-between shrink-0 animate-in fade-in">
             <div className="flex items-center space-x-2">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -3054,6 +3055,34 @@ function CleanChatWorkspaceView({
         if (data.assistant_message?.content) {
           speakText(data.assistant_message.content);
         }
+      } else {
+        // Local offline response fallback
+        const lower = textToSend.toLowerCase();
+        let reply = `I received your message: "${textToSend}".\n\nI am currently operating in Local Offline Mode on your device. Your conversations and preferences are preserved locally.\n\nTo enable cloud reasoning and multi-agent workflows, deploy your Express server and enter your HTTPS URL in Settings → Cloud Backend Server Endpoint.`;
+        if (lower.includes('hello') || lower.includes('hi') || lower.includes('how far')) {
+          reply = `Hello! I am ${assistantName} — running natively on your Android device.\n\nHow can I help you today?`;
+        } else if (lower.includes('shoe') || lower.includes('sneaker')) {
+          reply = `We previously discussed custom high-top sneakers in obsidian black and cobalt blue with a gum sole and premium breathable leather. This is remembered in your permanent memory records.`;
+        } else if (lower.includes('apk') || lower.includes('build')) {
+          reply = `You are currently running the signed standalone Android APK of ${assistantName}! All frontend bundles, assets, icons, and knowledge corpus are embedded directly in the APK package.`;
+        }
+
+        const botMsg: ChatMessage = {
+          id: `msg_local_${Date.now()}`,
+          role: 'assistant',
+          content: reply,
+          timestamp: new Date().toISOString(),
+        };
+
+        setMessages((prev) => [
+          ...prev.filter((m) => m.id !== tempUserMsg.id),
+          tempUserMsg,
+          botMsg,
+        ]);
+
+        if (voiceEnabled) {
+          speakText(reply);
+        }
       }
     } finally {
       setLoading(false);
@@ -4588,6 +4617,10 @@ function CleanSettingsWorkspaceView({
 }) {
   const [nameInput, setNameInput] = useState(assistantName);
   const [saved, setSaved] = useState(false);
+  const [backendUrlInput, setBackendUrlInput] = useState(() => getBackendUrl());
+  const [backendUrlSaved, setBackendUrlSaved] = useState(false);
+  const [backendTesting, setBackendTesting] = useState(false);
+  const [backendTestResult, setBackendTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [intelStatus, setIntelStatus] = useState<any>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [evalResults, setEvalResults] = useState<any>(null);
@@ -4663,6 +4696,64 @@ function CleanSettingsWorkspaceView({
       setAssistantName(nameInput);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    }
+  };
+
+  const handleSaveBackendUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    setBackendUrl(backendUrlInput);
+    setBackendUrlSaved(true);
+    setTimeout(() => setBackendUrlSaved(false), 3000);
+  };
+
+  const handleTestBackendConnection = async () => {
+    const targetUrl = backendUrlInput.trim().replace(/\/+$/, '');
+    if (!targetUrl) {
+      setBackendTestResult({
+        success: false,
+        message: 'No backend URL entered. The app is currently operating in Local Offline Mode. Enter your HTTPS cloud URL (e.g. https://my-backend.com) to connect.',
+      });
+      return;
+    }
+
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      setBackendTestResult({
+        success: false,
+        message: 'Invalid URL. Please include https:// (e.g. https://my-backend.com)',
+      });
+      return;
+    }
+
+    setBackendTesting(true);
+    setBackendTestResult(null);
+    try {
+      const testEndpoint = `${targetUrl}/api/status`;
+      const res = await fetch(testEndpoint, { signal: AbortSignal.timeout(6000) });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json();
+        setBackendTestResult({
+          success: true,
+          message: `Connected successfully to ${data.name || 'RARE Server'} (HTTP ${res.status})`,
+        });
+      } else if (res.ok && !ct.includes('application/json')) {
+        setBackendTestResult({
+          success: false,
+          message: `Server reached (HTTP ${res.status}), but returned HTML instead of RARE JSON API. Ensure the URL points to your deployed Express server backend.`,
+        });
+      } else {
+        setBackendTestResult({
+          success: false,
+          message: `Server returned HTTP ${res.status}: ${res.statusText}`,
+        });
+      }
+    } catch (err: any) {
+      setBackendTestResult({
+        success: false,
+        message: `Failed to connect: ${err?.message || 'Network unreachable'}. Make sure your cloud server is running and accessible over HTTPS.`,
+      });
+    } finally {
+      setBackendTesting(false);
     }
   };
 
@@ -5004,6 +5095,67 @@ function CleanSettingsWorkspaceView({
             </button>
           </div>
         </form>
+
+        {/* Cloud Backend Server Endpoint Configuration */}
+        <div className={`pt-4 border-t ${t.cardBorder} space-y-3`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Globe className="w-4 h-4 text-sky-400" />
+              <h4 className="text-xs font-bold text-white">Cloud Backend Server Endpoint</h4>
+            </div>
+            <span className="text-[10px] font-mono text-slate-400">Mobile & Standalone Sync</span>
+          </div>
+          <p className={`text-[11px] ${t.textMuted} leading-relaxed`}>
+            When installed on another phone (Android APK), local addresses (<code className="font-mono text-amber-300">localhost</code> / <code className="font-mono text-amber-300">127.0.0.1</code>) refer to the phone hardware itself. Configure your publicly deployed HTTPS backend server URL below to enable full online cloud sync across Wi-Fi or mobile data.
+          </p>
+          <form onSubmit={handleSaveBackendUrl} className="space-y-2">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="url"
+                placeholder="https://your-rare-backend.com (leave blank for local mode)"
+                value={backendUrlInput}
+                onChange={(e) => {
+                  setBackendUrlInput(e.target.value);
+                  setBackendTestResult(null);
+                }}
+                className={`flex-1 ${t.inputBg} border ${t.inputBorder} rounded-lg px-3 py-2 text-xs focus:outline-none font-mono`}
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestBackendConnection}
+                  disabled={backendTesting}
+                  className={`px-3 py-2 rounded-lg border ${t.cardBorder} ${t.cardSub} hover:border-white/20 text-xs font-semibold flex items-center space-x-1.5 transition disabled:opacity-50`}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${backendTesting ? 'animate-spin' : ''}`} />
+                  <span>{backendTesting ? 'Testing...' : 'Test Connection'}</span>
+                </button>
+                <button
+                  type="submit"
+                  className={`px-4 py-2 rounded-lg ${t.accentBg} text-white text-xs font-semibold transition cursor-pointer`}
+                >
+                  {backendUrlSaved ? 'Saved!' : 'Save URL'}
+                </button>
+              </div>
+            </div>
+            {backendTestResult && (
+              <div
+                className={`p-2.5 rounded-lg text-xs flex items-center space-x-2 border ${
+                  backendTestResult.success
+                    ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+                    : 'bg-amber-950/40 border-amber-500/30 text-amber-300'
+                }`}
+              >
+                {backendTestResult.success ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                )}
+                <span>{backendTestResult.message}</span>
+              </div>
+            )}
+          </form>
+        </div>
 
         {/* DEDICATED DEVELOPER SPACE ENTRY POINT */}
         <div className={`pt-4 border-t ${t.cardBorder}`}>

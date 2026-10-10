@@ -32,6 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
             aapt zipalign apksigner ecj dalvik-exchange android-sdk-platform-23 openjdk-17-jdk-headless
 
       - name: Build and Sign Android APK

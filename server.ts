@@ -2710,6 +2710,31 @@ app.post('/api/images/edit', async (req, res) => {
   });
 });
 
+// Download Standalone Android APK Endpoint
+app.get('/api/download/apk', (req, res) => {
+  const candidatePaths = [
+    path.resolve(__dirname, 'exports', 'rare-v1.0.0-release.apk'),
+    path.resolve(__dirname, 'public', 'rare-v1.0.0-release.apk'),
+    path.resolve(__dirname, 'dist', 'rare-v1.0.0-release.apk'),
+    '/tmp/android_apk_build/bin/rare-v1.0.0-release.apk',
+    path.resolve(__dirname, 'rare-v1.0.0-release.apk'),
+  ];
+
+  for (const apkPath of candidatePaths) {
+    if (fs.existsSync(apkPath)) {
+      const stats = fs.statSync(apkPath);
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Disposition', 'attachment; filename="RARE-v1.0.0-release.apk"');
+      res.setHeader('Content-Length', stats.size);
+      return res.sendFile(apkPath);
+    }
+  }
+
+  res.status(404).json({
+    error: 'APK artifact not found on server. Please run npm run build:apk or download from GitHub Actions release.',
+  });
+});
+
 // Start Server with Vite Middleware in Development
 async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production';
