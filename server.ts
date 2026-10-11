@@ -10,6 +10,8 @@ import { MemoryStore, ConversationStore } from './src/server/storage/MemoryStore
 import { CheckpointStore } from './src/server/storage/CheckpointStore.js';
 import { TrajectoryStore } from './src/server/storage/TrajectoryStore.js';
 import { UpdateStore, UpdateChannel } from './src/server/storage/UpdateStore.js';
+import { DurableStateStore } from './src/server/storage/DurableStateStore.js';
+import { PersistentJsonStore } from './src/server/storage/PersistentJsonStore.js';
 import { ToolExecutor } from './src/server/tools/ToolExecutor.js';
 import { ProviderRegistry } from './src/server/providers/ProviderRegistry.js';
 import { SelfDevelopmentEngine } from './src/server/development/SelfDevelopmentEngine.js';
@@ -18,9 +20,39 @@ import { BenchmarkSuite } from './src/server/evaluation/BenchmarkSuite.js';
 const app = express();
 const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
 const PORT = process.env.PORT === undefined ? 5000 : Number(process.env.PORT);
+const durableStateStore = new DurableStateStore();
+let persistentStorage: PersistentJsonStore | undefined;
 
 app.use(cors());
 app.use(express.json({ limit: '15mb' }));
+app.use((req, res, next) => {
+  const originalEnd = res.end.bind(res);
+  let ending = false;
+  res.end = ((...args: any[]) => {
+    const finish = () =>
+      (originalEnd as (...endArgs: any[]) => express.Response)(...args);
+    if (ending) return finish();
+    ending = true;
+
+    const storage = persistentStorage;
+    if (!storage) return finish();
+
+    void storage.flush().then(finish).catch((error) => {
+      console.error('[Storage] Could not persist request state:', error);
+      if (res.headersSent) return finish();
+      res.statusCode = 503;
+      res.removeHeader('Content-Length');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      (originalEnd as (...endArgs: any[]) => express.Response)(
+        JSON.stringify({
+          error: { message: 'Persistent storage failed; the request was not confirmed.' },
+        }),
+      );
+    });
+    return res;
+  }) as typeof res.end;
+  next();
+});
 
 // -----------------------------------------------------------------------------
 // Core System Singletons & Persistent Stores
@@ -38,9 +70,12 @@ const benchmarkSuite = new BenchmarkSuite(toolExecutor, memoryStore, checkpointS
 // -----------------------------------------------------------------------------
 // Core System State & Config
 // -----------------------------------------------------------------------------
-let assistantName = 'RARE';
-let autonomyLevel = 2;
-let activeTheme: 'blue' | 'white' | 'dark' | 'red' | 'green' | 'yellow' = 'blue';
+type ActiveTheme = 'blue' | 'white' | 'dark' | 'red' | 'green' | 'yellow';
+const appSettings = durableStateStore.trackObject('app_settings', {
+  assistantName: 'RARE',
+  autonomyLevel: 2,
+  activeTheme: 'blue' as ActiveTheme,
+});
 
 // Developer authorization secret & active session
 let currentDeveloperPasskey = process.env.RARE_DEV_KEY?.trim() || null;
@@ -56,7 +91,10 @@ interface DevAccessRequest {
   timestamp: string;
   status: 'pending' | 'approved' | 'rejected';
 }
-const devAccessRequests: DevAccessRequest[] = [];
+const devAccessRequests = durableStateStore.trackArray<DevAccessRequest>(
+  'developer_access_requests',
+  [],
+);
 
 // User accounts database (in-memory persistent state)
 interface AppUser {
@@ -64,12 +102,12 @@ interface AppUser {
   name: string;
   email?: string;
   phone?: string;
-  password?: string;
+  passwordHash?: string;
   provider: 'google' | 'outlook' | 'email' | 'phone';
   role: 'developer' | 'user';
   createdAt: string;
 }
-const registeredUsers: Map<string, AppUser> = new Map([
+let registeredUsers: Map<string, AppUser> = new Map([
   [
     'rarelivescore@gmail.com',
     {
@@ -82,6 +120,7 @@ const registeredUsers: Map<string, AppUser> = new Map([
     },
   ],
 ]);
+registeredUsers = durableStateStore.trackMap('registered_users', registeredUsers);
 
 interface AuditEvent {
   id: string;
@@ -93,7 +132,7 @@ interface AuditEvent {
   checkpointId?: string;
 }
 
-const auditLog: AuditEvent[] = [
+let auditLog: AuditEvent[] = [
   {
     id: 'aud_001',
     timestamp: new Date(Date.now() - 7200000).toISOString(),
@@ -103,6 +142,7 @@ const auditLog: AuditEvent[] = [
     details: 'RARE 045 runtime initialized. Single-writer lock verified.',
   },
 ];
+auditLog = durableStateStore.trackArray('audit_log', auditLog);
 
 // Checkpoints
 interface Checkpoint {
@@ -114,7 +154,7 @@ interface Checkpoint {
   hash: string;
 }
 
-const checkpoints: Checkpoint[] = [
+let checkpoints: Checkpoint[] = [
   {
     id: 'chk_045_base',
     timestamp: new Date(Date.now() - 3600000).toISOString(),
@@ -124,6 +164,7 @@ const checkpoints: Checkpoint[] = [
     hash: 'sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   },
 ];
+checkpoints = durableStateStore.trackArray('legacy_checkpoints', checkpoints);
 
 // Memory
 interface MemoryItem {
@@ -135,7 +176,7 @@ interface MemoryItem {
   timestamp: string;
 }
 
-const memories: MemoryItem[] = [
+let memories: MemoryItem[] = [
   {
     id: 'mem_1',
     kind: 'preference',
@@ -169,6 +210,7 @@ const memories: MemoryItem[] = [
     timestamp: new Date(Date.now() - 86400000).toISOString(),
   },
 ];
+memories = durableStateStore.trackArray('app_memories', memories);
 
 // -----------------------------------------------------------------------------
 // Collaborative Multi-Agent System Core
@@ -466,7 +508,7 @@ function deriveConversationTitle(msgs: ChatMessage[]): string {
   return title ? (title.charAt(0).toUpperCase() + title.slice(1)) : 'Discussion Session';
 }
 
-const conversations: Conversation[] = [
+let conversations: Conversation[] = [
   {
     id: 'conv_main',
     title: 'General Inquiries',
@@ -486,9 +528,10 @@ What would you like to work on today?
     ],
   },
 ];
+conversations = durableStateStore.trackArray('app_conversations', conversations);
 
 // Documents Repository
-const documents: Record<string, { content: string; format: string; updatedAt: string }> = {
+let documents: Record<string, { content: string; format: string; updatedAt: string }> = {
   'project_plan_overview.md': {
     format: 'markdown',
     updatedAt: new Date().toISOString(),
@@ -510,6 +553,7 @@ const documents: Record<string, { content: string; format: string; updatedAt: st
 [00:01:34] Marcus: Under two seconds for regression diagnosis and auto-patch application.`,
   },
 };
+documents = durableStateStore.trackObject('documents', documents);
 
 // Research Cache & Evidence
 interface ResearchItem {

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { CheckpointRecord } from '../types.js';
+import type { PersistentJsonStore, StoredSnapshotFile } from './PersistentJsonStore.js';
 
 const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
 const CHECKPOINTS_DIR = path.resolve(PROJECT_ROOT, '.rare', 'checkpoints');
@@ -9,9 +10,46 @@ const REGISTRY_FILE = path.resolve(CHECKPOINTS_DIR, 'checkpoints_registry.json')
 
 export class CheckpointStore {
   private registry: Map<string, CheckpointRecord> = new Map();
+  private persistence: PersistentJsonStore | undefined;
 
   constructor() {
     this.init();
+  }
+
+  public async initializePersistence(persistence: PersistentJsonStore): Promise<void> {
+    this.persistence = persistence;
+    const records = await persistence.getOrSeed(
+      'checkpoints',
+      Array.from(this.registry.values()),
+    );
+    this.registry = new Map(records.map((record) => [record.id, record]));
+
+    for (const record of records) {
+      const snapshotDir = path.resolve(PROJECT_ROOT, record.snapshotDir);
+      const storedFiles = await persistence.loadSnapshotFiles(record.id);
+      if (storedFiles.length > 0) {
+        for (const file of storedFiles) {
+          const destination = this.resolveSafePath(snapshotDir, file.relativePath);
+          fs.mkdirSync(path.dirname(destination), { recursive: true });
+          fs.writeFileSync(destination, file.content);
+        }
+        continue;
+      }
+
+      const localFiles: StoredSnapshotFile[] = [];
+      for (const relativePath of record.filesList) {
+        const localPath = this.resolveSafePath(snapshotDir, relativePath);
+        if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+          localFiles.push({
+            relativePath,
+            content: fs.readFileSync(localPath),
+          });
+        }
+      }
+      if (localFiles.length > 0) {
+        persistence.setSnapshotFiles(record.id, localFiles);
+      }
+    }
   }
 
   private init(): void {
@@ -38,14 +76,15 @@ export class CheckpointStore {
   }
 
   private saveRegistry(): void {
+    const arr = Array.from(this.registry.values());
     try {
-      const arr = Array.from(this.registry.values());
       const tempPath = `${REGISTRY_FILE}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(arr, null, 2), 'utf-8');
       fs.renameSync(tempPath, REGISTRY_FILE);
     } catch (err) {
       console.error('[CheckpointStore] Failed to write registry:', err);
     }
+    this.persistence?.setDocument('checkpoints', arr);
   }
 
   public getAll(): CheckpointRecord[] {
@@ -73,17 +112,19 @@ export class CheckpointStore {
       : ['server.ts', 'src/App.tsx', 'package.json', 'rare.config.json'];
 
     const backedUp: string[] = [];
+    const snapshotFiles: StoredSnapshotFile[] = [];
     const hashGenerator = crypto.createHash('sha256');
 
     for (const rel of filesToBackup) {
-      const fullPath = path.resolve(PROJECT_ROOT, rel);
+      const fullPath = this.resolveSafePath(PROJECT_ROOT, rel);
       if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
         const content = fs.readFileSync(fullPath);
         hashGenerator.update(content);
-        const dest = path.resolve(snapshotDir, rel);
+        const dest = this.resolveSafePath(snapshotDir, rel);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.writeFileSync(dest, content);
         backedUp.push(rel);
+        snapshotFiles.push({ relativePath: rel, content });
       }
     }
 
@@ -100,6 +141,7 @@ export class CheckpointStore {
 
     this.registry.set(id, record);
     this.saveRegistry();
+    this.persistence?.setSnapshotFiles(id, snapshotFiles);
     return record;
   }
 
@@ -116,8 +158,8 @@ export class CheckpointStore {
 
     const restored: string[] = [];
     for (const rel of cp.filesList) {
-      const backupFile = path.resolve(snapshotDir, rel);
-      const targetFile = path.resolve(PROJECT_ROOT, rel);
+      const backupFile = this.resolveSafePath(snapshotDir, rel);
+      const targetFile = this.resolveSafePath(PROJECT_ROOT, rel);
       if (fs.existsSync(backupFile)) {
         fs.mkdirSync(path.dirname(targetFile), { recursive: true });
         fs.copyFileSync(backupFile, targetFile);
@@ -126,5 +168,14 @@ export class CheckpointStore {
     }
 
     return { success: true, restoredFiles: restored };
+  }
+
+  private resolveSafePath(root: string, relativePath: string): string {
+    const resolvedRoot = path.resolve(root);
+    const resolved = path.resolve(resolvedRoot, relativePath);
+    if (resolved !== resolvedRoot && !resolved.startsWith(`${resolvedRoot}${path.sep}`)) {
+      throw new Error(`Unsafe checkpoint path: ${relativePath}`);
+    }
+    return resolved;
   }
 }

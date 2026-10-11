@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import type { PersistentJsonStore } from './PersistentJsonStore.js';
 
 const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
 const UPDATES_FILE = path.join(PROJECT_ROOT, 'knowledge', 'updates.json');
@@ -24,10 +25,16 @@ export interface AppUpdate {
 export class UpdateStore {
   private filePath: string;
   private updates: AppUpdate[] = [];
+  private persistence: PersistentJsonStore | undefined;
 
   constructor(customPath?: string) {
     this.filePath = customPath || UPDATES_FILE;
     this.init();
+  }
+
+  public async initializePersistence(persistence: PersistentJsonStore): Promise<void> {
+    this.persistence = persistence;
+    this.updates = await persistence.getOrSeed('updates', this.updates);
   }
 
   private init() {
@@ -97,6 +104,7 @@ export class UpdateStore {
     } catch (err) {
       console.error('[UpdateStore] Save failed:', err);
     }
+    this.persistence?.setDocument('updates', this.updates);
   }
 
   public getAll(channel?: UpdateChannel): AppUpdate[] {

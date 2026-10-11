@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import type { PersistentJsonStore } from './PersistentJsonStore.js';
 import { MemoryRecord } from '../types.js';
 
 const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
@@ -52,9 +53,16 @@ const SEED_MEMORIES: MemoryRecord[] = [
 
 export class MemoryStore {
   private memories: Map<string, MemoryRecord> = new Map();
+  private persistence: PersistentJsonStore | undefined;
 
   constructor() {
     this.init();
+  }
+
+  public async initializePersistence(persistence: PersistentJsonStore): Promise<void> {
+    this.persistence = persistence;
+    const records = await persistence.getOrSeed('memories', Array.from(this.memories.values()));
+    this.memories = new Map(records.map((record) => [record.id, record]));
   }
 
   private init(): void {
@@ -88,14 +96,15 @@ export class MemoryStore {
   }
 
   private saveToDisk(): void {
+    const arr = Array.from(this.memories.values());
     try {
-      const arr = Array.from(this.memories.values());
       const tempPath = `${MEMORIES_FILE}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(arr, null, 2), 'utf-8');
       fs.renameSync(tempPath, MEMORIES_FILE);
     } catch (err) {
       console.error('[MemoryStore] Failed to write memories to disk:', err);
     }
+    this.persistence?.setDocument('memories', arr);
   }
 
   public getAll(): MemoryRecord[] {
@@ -211,9 +220,19 @@ export interface ConversationRecord {
 
 export class ConversationStore {
   private conversations: Map<string, ConversationRecord> = new Map();
+  private persistence: PersistentJsonStore | undefined;
 
   constructor() {
     this.init();
+  }
+
+  public async initializePersistence(persistence: PersistentJsonStore): Promise<void> {
+    this.persistence = persistence;
+    const records = await persistence.getOrSeed(
+      'conversation_store',
+      Array.from(this.conversations.values()),
+    );
+    this.conversations = new Map(records.map((record) => [record.id, record]));
   }
 
   private init(): void {
@@ -255,14 +274,15 @@ export class ConversationStore {
   }
 
   private saveToDisk(): void {
+    const arr = Array.from(this.conversations.values());
     try {
-      const arr = Array.from(this.conversations.values());
       const tempPath = `${CONVERSATIONS_FILE}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(arr, null, 2), 'utf-8');
       fs.renameSync(tempPath, CONVERSATIONS_FILE);
     } catch (err) {
       console.error('[ConversationStore] Failed to write conversations to disk:', err);
     }
+    this.persistence?.setDocument('conversation_store', arr);
   }
 
   public getAll(userId?: string): ConversationRecord[] {

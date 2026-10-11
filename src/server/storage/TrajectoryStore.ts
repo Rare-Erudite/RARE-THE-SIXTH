@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { DevelopmentTrajectory } from '../types.js';
+import type { PersistentJsonStore } from './PersistentJsonStore.js';
 
 const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
 const KNOWLEDGE_DIR = path.resolve(PROJECT_ROOT, 'knowledge');
@@ -8,9 +9,19 @@ const TRAJECTORIES_FILE = path.resolve(KNOWLEDGE_DIR, 'trajectories.json');
 
 export class TrajectoryStore {
   private trajectories: Map<string, DevelopmentTrajectory> = new Map();
+  private persistence: PersistentJsonStore | undefined;
 
   constructor() {
     this.init();
+  }
+
+  public async initializePersistence(persistence: PersistentJsonStore): Promise<void> {
+    this.persistence = persistence;
+    const records = await persistence.getOrSeed(
+      'trajectories',
+      Array.from(this.trajectories.values()),
+    );
+    this.trajectories = new Map(records.map((record) => [record.id, record]));
   }
 
   private init(): void {
@@ -34,14 +45,15 @@ export class TrajectoryStore {
   }
 
   private saveToDisk(): void {
+    const arr = Array.from(this.trajectories.values());
     try {
-      const arr = Array.from(this.trajectories.values());
       const tempPath = `${TRAJECTORIES_FILE}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(arr, null, 2), 'utf-8');
       fs.renameSync(tempPath, TRAJECTORIES_FILE);
     } catch (err) {
       console.error('[TrajectoryStore] Failed to write trajectories:', err);
     }
+    this.persistence?.setDocument('trajectories', arr);
   }
 
   public getAll(): DevelopmentTrajectory[] {
