@@ -2,7 +2,8 @@ export type ProviderType =
   | 'offline_cognitive'
   | 'local_ollama'
   | 'openai_compatible'
-  | 'gemini_coprocessor';
+  | 'gemini_coprocessor'
+  | 'rare_intelligence';
 
 export interface ModelInfo {
   id: string;

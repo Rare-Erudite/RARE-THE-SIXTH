@@ -2,6 +2,7 @@ import { IModelProvider, ModelInfo, GenerationOptions, GenerationResult } from '
 import { OfflineCognitiveEngine } from './OfflineCognitiveEngine.js';
 import { OllamaProvider } from './OllamaProvider.js';
 import { GeminiCoprocessorProvider } from './GeminiCoprocessorProvider.js';
+import { RareIntelligenceProvider } from './RareIntelligenceProvider.js';
 import { MemoryStore } from '../storage/MemoryStore.js';
 import { ToolExecutor } from '../tools/ToolExecutor.js';
 
@@ -9,12 +10,17 @@ export class ProviderRegistry {
   private offlineEngine: OfflineCognitiveEngine;
   private ollamaProvider: OllamaProvider;
   private geminiProvider: GeminiCoprocessorProvider;
+  private rareIntelligenceProvider: RareIntelligenceProvider;
   private preferredProviderId: string = 'rare-offline-cognitive';
 
   constructor(memoryStore: MemoryStore, toolExecutor: ToolExecutor) {
     this.offlineEngine = new OfflineCognitiveEngine(memoryStore, toolExecutor);
     this.ollamaProvider = new OllamaProvider();
     this.geminiProvider = new GeminiCoprocessorProvider();
+    // Optional bridge to the companion RARE-INTELLIGENCE engine. Inert unless
+    // RARE_INTELLIGENCE_URL is configured AND the engine is reachable, so it
+    // never changes existing behaviour when unset.
+    this.rareIntelligenceProvider = new RareIntelligenceProvider();
   }
 
   public setPreferredProvider(id: string): void {
@@ -30,6 +36,7 @@ export class ProviderRegistry {
       this.offlineEngine.getInfo(),
       this.ollamaProvider.getInfo(),
       this.geminiProvider.getInfo(),
+      this.rareIntelligenceProvider.getInfo(),
     ]);
     return list;
   }
@@ -48,6 +55,22 @@ export class ProviderRegistry {
       return {
         provider: this.geminiProvider,
         info: await this.geminiProvider.getInfo(),
+      };
+    }
+
+    // 2b. Explicit preference for the RARE-INTELLIGENCE engine bridge
+    if (this.preferredProviderId === 'rare-intelligence' && this.rareIntelligenceProvider.isConfigured()) {
+      return {
+        provider: this.rareIntelligenceProvider,
+        info: await this.rareIntelligenceProvider.getInfo(),
+      };
+    }
+
+    // 2c. RARE-INTELLIGENCE engine bridge — used only when configured and reachable
+    if (this.rareIntelligenceProvider.isConfigured() && (await this.rareIntelligenceProvider.isAvailable())) {
+      return {
+        provider: this.rareIntelligenceProvider,
+        info: await this.rareIntelligenceProvider.getInfo(),
       };
     }
 
@@ -83,5 +106,9 @@ export class ProviderRegistry {
 
   public getOfflineEngine(): OfflineCognitiveEngine {
     return this.offlineEngine;
+  }
+
+  public getRareIntelligenceProvider(): RareIntelligenceProvider {
+    return this.rareIntelligenceProvider;
   }
 }

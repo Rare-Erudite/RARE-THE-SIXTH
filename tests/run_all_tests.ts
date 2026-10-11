@@ -4,6 +4,7 @@ import { runMemoryTests } from './test_memory.js';
 import { runDevelopmentTests } from './test_development.js';
 import { runEvaluationTests } from './test_evaluation.js';
 import { runApiConfigurationTests } from './test_api_configuration.js';
+import { runRareIntelligenceBridgeTests } from './test_rare_intelligence_bridge.js';
 
 async function main() {
   console.log('=====================================================');
@@ -14,6 +15,8 @@ async function main() {
     await runApiConfigurationTests();
     console.log();
     await runModelProviderTests();
+    console.log();
+    await runRareIntelligenceBridgeTests();
     console.log();
     await runToolTests();
     console.log();
