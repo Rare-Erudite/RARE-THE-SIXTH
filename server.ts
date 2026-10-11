@@ -102,6 +102,7 @@ interface AppUser {
   name: string;
   email?: string;
   phone?: string;
+  password?: string;
   passwordHash?: string;
   provider: 'google' | 'outlook' | 'email' | 'phone';
   role: 'developer' | 'user';
@@ -480,9 +481,9 @@ function deriveConversationTitle(msgs: ChatMessage[]): string {
   const substantive = userMsgs.find((m) => !greetingRegex.test(m) && m.length > 2) || userMsgs[0];
 
   let cleaned = substantive
-    .replace(/^(hi|hello|hey|good\s+(morning|afternoon|evening|day))[\s!.,;:—–\-]*/i, '')
+    .replace(/^(hi|hello|hey|good\s+(morning|afternoon|evening|day))[\s!.,;:\u2014\u2013\-]*/i, '')
     .replace(/^(can\s+you|can\s+we|could\s+you|could\s+we|please|i\s+want\s+to|let'?s\s+talk\s+about|tell\s+me\s+about|what\s+about|how\s+do\s+i|how\s+can\s+i)\s+/i, '')
-    .replace(/^[\s!.,;:?—–\-]+/, '')
+    .replace(/^[\s!.,;:?\u2014\u2013\-]+/, '')
     .trim();
 
   // If intent was build or project
@@ -517,12 +518,7 @@ let conversations: Conversation[] = [
       {
         id: 'msg_1',
         role: 'assistant',
-        content: `Hello! I am **RARE** — your personal intelligence and development assistant.
-
-What would you like to work on today?
-• **Projects / Build**: Build web, mobile, or desktop software with coordinated specialist agents.
-• **Documents**: Manage, read, edit, or transcribe audio documents.
-• **Research**: Investigate technical, academic, or factual topics with verified sources.`,
+        content: `Hello! I am **RARE** — your personal intelligence and development assistant.\n\nWhat would you like to work on today?\n• **Projects / Build**: Build web, mobile, or desktop software with coordinated specialist agents.\n• **Documents**: Manage, read, edit, or transcribe audio documents.\n• **Research**: Investigate technical, academic, or factual topics with verified sources.`,
         timestamp: new Date(Date.now() - 3600000).toISOString(),
       },
     ],
@@ -535,22 +531,12 @@ let documents: Record<string, { content: string; format: string; updatedAt: stri
   'project_plan_overview.md': {
     format: 'markdown',
     updatedAt: new Date().toISOString(),
-    content: `# Project Plan: Personal Workspace & Systems
-
-## Objectives
-1. Build intuitive tools for document analysis, software creation, and multi-source research.
-2. Maintain high privacy standards with local-first processing.
-3. Streamline workflows through coordinated specialist agents.`,
+    content: `# Project Plan: Personal Workspace & Systems\n\n## Objectives\n1. Build intuitive tools for document analysis, software creation, and multi-source research.\n2. Maintain high privacy standards with local-first processing.\n3. Streamline workflows through coordinated specialist agents.`,
   },
   'executive_meeting_transcript.txt': {
     format: 'text',
     updatedAt: new Date().toISOString(),
-    content: `[00:00:12] Marcus (Lead Architect): Welcome everyone. Today we are reviewing the cross-platform roadmap for our client applications across Windows and Android devices.
-[00:00:26] Elena (Staff Engineer): [Soft acoustic audio: verified as question on local offline storage sync]
-[00:00:32] Elena: "When network connections fluctuate or are offline, our local SQLite store caches changes and replays them immediately upon reconnection."
-[00:01:05] Marcus: Precisely. That guarantees zero data loss and preserves full battery efficiency on mobile phones.
-[00:01:25] David (QA Lead): [Audience question: verified from context regarding test automation] What is our target turnaround time for automated self-repair diagnostics?
-[00:01:34] Marcus: Under two seconds for regression diagnosis and auto-patch application.`,
+    content: `[00:00:12] Marcus (Lead Architect): Welcome everyone. Today we are reviewing the cross-platform roadmap for our client applications across Windows and Android devices.\n[00:00:26] Elena (Staff Engineer): [Soft acoustic audio: verified as question on local offline storage sync]\n[00:00:32] Elena: "When network connections fluctuate or are offline, our local SQLite store caches changes and replays them immediately upon reconnection."\n[00:01:05] Marcus: Precisely. That guarantees zero data loss and preserves full battery efficiency on mobile phones.\n[00:01:25] David (QA Lead): [Audience question: verified from context regarding test automation] What is our target turnaround time for automated self-repair diagnostics?\n[00:01:34] Marcus: Under two seconds for regression diagnosis and auto-patch application.`,
   },
 };
 documents = durableStateStore.trackObject('documents', documents);
@@ -709,9 +695,9 @@ app.get('/api/health', (_req, res) => {
     uptimeSeconds: Math.floor(process.uptime()),
     release: '045',
     status: 'healthy',
-    autonomy: autonomyLevel,
-    assistant_name: assistantName,
-    theme: activeTheme,
+    autonomy: appSettings.autonomyLevel,
+    assistant_name: appSettings.assistantName,
+    theme: appSettings.activeTheme,
   });
 });
 
@@ -956,9 +942,9 @@ app.get('/api/settings', async (req, res) => {
   const { info: activeInfo } = await providerRegistry.getActiveProvider();
   const lastEval = benchmarkSuite.getLastReport();
   res.json({
-    assistant_name: assistantName,
-    autonomy_level: autonomyLevel,
-    theme: activeTheme,
+    assistant_name: appSettings.assistantName,
+    autonomy_level: appSettings.autonomyLevel,
+    theme: appSettings.activeTheme,
     model_provider: activeInfo.id,
     model_name: `${activeInfo.name} (${activeInfo.version})`,
     requires_api_key: activeInfo.requires_api_key,
@@ -976,6 +962,27 @@ app.get('/api/settings', async (req, res) => {
 app.get('/api/intelligence/status', async (req, res) => {
   const status = await getDynamicIntelligenceStatus();
   res.json(status);
+});
+
+// Companion RARE-INTELLIGENCE engine bridge status (additive; inert when unconfigured).
+// Exposes whether the bridge is configured and reachable without touching existing routes.
+app.get('/api/integration/rare-intelligence', async (_req, res) => {
+  const provider = providerRegistry.getRareIntelligenceProvider();
+  const configured = provider.isConfigured();
+  const available = configured ? await provider.isAvailable() : false;
+  const info = await provider.getInfo();
+  res.json({
+    configured,
+    available,
+    bridge: {
+      id: info.id,
+      name: info.name,
+      version: info.version,
+      is_available: info.is_available,
+      provider_type: info.type,
+      notes: info.notes,
+    },
+  });
 });
 
 // Run reproducible empirical evaluation benchmark suite
@@ -1097,16 +1104,16 @@ app.get('/api/memories/export', (req, res) => {
 
 app.post('/api/settings', (req, res) => {
   const { assistant_name, autonomy_level: newAutonomy, theme: newTheme } = req.body;
-  if (assistant_name) assistantName = assistant_name.trim();
-  if (typeof newAutonomy === 'number') autonomyLevel = newAutonomy;
+  if (assistant_name) appSettings.assistantName = assistant_name.trim();
+  if (typeof newAutonomy === 'number') appSettings.autonomyLevel = newAutonomy;
   if (newTheme && ['blue', 'white', 'dark', 'red', 'green', 'yellow'].includes(newTheme)) {
-    activeTheme = newTheme;
+    appSettings.activeTheme = newTheme;
   }
   res.json({
     success: true,
-    assistant_name: assistantName,
-    autonomy_level: autonomyLevel,
-    theme: activeTheme,
+    assistant_name: appSettings.assistantName,
+    autonomy_level: appSettings.autonomyLevel,
+    theme: appSettings.activeTheme,
   });
 });
 
@@ -1446,7 +1453,7 @@ app.get('/api/developer/status', (req, res) => {
 
   res.json({
     authenticated: true,
-    autonomyLevel,
+    autonomyLevel: appSettings.autonomyLevel,
     singleWriterLock: 'Active (Mutex Acquired)',
     checkpointRetention: 'Keep last 40 snapshots / 30 days',
     checkpointsCount: checkpoints.length,
@@ -1830,13 +1837,7 @@ app.post('/api/conversations', (req, res) => {
       {
         id: `msg_${Date.now()}`,
         role: 'assistant' as const,
-        content: `Hello! I am ${assistantName} — your personal AI companion and software builder.
-
-What would you like to explore today?
-• Chat casually about any topic — my permanent memory retains everything we discuss
-• Type to build a project (APK, EXE, or Web bundle)
-• Schedule an alarm, reminder, or recurring automation
-• Generate or edit high-fidelity images`,
+        content: `Hello! I am ${appSettings.assistantName} — your personal AI companion and software builder.\n\nWhat would you like to explore today?\n• Chat casually about any topic — my permanent memory retains everything we discuss\n• Type to build a project (APK, EXE, or Web bundle)\n• Schedule an alarm, reminder, or recurring automation\n• Generate or edit high-fidelity images`,
         timestamp: new Date().toISOString(),
       },
     ],
@@ -2004,13 +2005,7 @@ app.post('/api/documents/transcribe', (req, res) => {
   let verifiedTerms: string[] = [];
 
   if (sampleTopic === 'executive_strategy' || !sampleTopic) {
-    transcriptContent = `[00:00:00 - 00:00:18] Marcus (Chairperson): Welcome everyone. Let's begin the review of our cross-platform client rollouts for Windows and Android.
-[00:00:19 - 00:00:32] Elena (Engineering Lead): [Context-Verified Speech: "dual-device SQLite sync" | Confidence: 98.6%]
-[00:00:33 - 00:01:02] Elena: "When users transition between desktop workstations and mobile phones, state snapshots synchronize in under 450 milliseconds with deterministic conflict resolution."
-[00:01:03 - 00:01:14] Marcus: That directly satisfies our latency requirements. Does QA have validation numbers?
-[00:01:15 - 00:01:29] David (QA Lead): [Audience question: resolved from context as regression suite results]
-[00:01:30 - 00:01:54] David: "We ran 32 automated selftests across memory concurrency and platform bounds. All 32 passed with 97.4% test coverage."
-[00:01:55 - 00:02:10] Marcus: [Soft background movement] [inaudible / side-chatter in conference hall] Excellent work. Let's proceed to deployment.`;
+    transcriptContent = `[00:00:00 - 00:00:18] Marcus (Chairperson): Welcome everyone. Let's begin the review of our cross-platform client rollouts for Windows and Android.\n[00:00:19 - 00:00:32] Elena (Engineering Lead): [Context-Verified Speech: "dual-device SQLite sync" | Confidence: 98.6%]\n[00:00:33 - 00:01:02] Elena: "When users transition between desktop workstations and mobile phones, state snapshots synchronize in under 450 milliseconds with deterministic conflict resolution."\n[00:01:03 - 00:01:14] Marcus: That directly satisfies our latency requirements. Does QA have validation numbers?\n[00:01:15 - 00:01:29] David (QA Lead): [Audience question: resolved from context as regression suite results]\n[00:01:30 - 00:01:54] David: "We ran 32 automated selftests across memory concurrency and platform bounds. All 32 passed with 97.4% test coverage."\n[00:01:55 - 00:02:10] Marcus: [Soft background movement] [inaudible / side-chatter in conference hall] Excellent work. Let's proceed to deployment.`;
 
     verifiedNotes = [
       'Acoustically soft phrase at 00:00:19 verified as "dual-device SQLite sync" from system context.',
@@ -2020,10 +2015,7 @@ app.post('/api/documents/transcribe', (req, res) => {
     ];
     verifiedTerms = ['dual-device SQLite sync', 'regression suite results'];
   } else if (sampleTopic === 'academic_lecture') {
-    transcriptContent = `[00:00:00 - 00:00:25] Professor Vance: Today we analyze neuromuscular motor unit recruitment in skeletal muscle.
-[00:00:26 - 00:00:41] Student (Row 4): [Soft question: verified as "Henneman's size principle" from anatomical context]
-[00:00:42 - 00:01:18] Professor Vance: "Precisely. Smaller motor neurons with lower thresholds fire first before larger fast-twitch units are activated."
-[00:01:19 - 00:01:35] [inaudible / hallway chatter outside lecture hall]`;
+    transcriptContent = `[00:00:00 - 00:00:25] Professor Vance: Today we analyze neuromuscular motor unit recruitment in skeletal muscle.\n[00:00:26 - 00:00:41] Student (Row 4): [Soft question: verified as "Henneman's size principle" from anatomical context]\n[00:00:42 - 00:01:18] Professor Vance: "Precisely. Smaller motor neurons with lower thresholds fire first before larger fast-twitch units are activated."\n[00:01:19 - 00:01:35] [inaudible / hallway chatter outside lecture hall]`;
 
     verifiedNotes = [
       'Soft student question resolved as "Henneman\'s size principle" using physiology corpus.',
@@ -2031,10 +2023,7 @@ app.post('/api/documents/transcribe', (req, res) => {
     ];
     verifiedTerms = ["Henneman's size principle"];
   } else {
-    transcriptContent = `[00:00:01 - 00:00:22] Host: Welcome to today's technical deep dive.
-[00:00:23 - 00:00:54] Guest: [Soft audio: verified as "single-writer lock concurrency"] We ensure atomic state snapshots before applying any code mutations.
-[00:00:55 - 00:01:12] Host: [garbled microphone pop] How fast is the rollback mechanism?
-[00:01:13 - 00:01:35] Guest: Under one second to restore verified checkpoints.`;
+    transcriptContent = `[00:00:01 - 00:00:22] Host: Welcome to today's technical deep dive.\n[00:00:23 - 00:00:54] Guest: [Soft audio: verified as "single-writer lock concurrency"] We ensure atomic state snapshots before applying any code mutations.\n[00:00:55 - 00:01:12] Host: [garbled microphone pop] How fast is the rollback mechanism?\n[00:01:13 - 00:01:35] Guest: Under one second to restore verified checkpoints.`;
 
     verifiedNotes = [
       'Technical phrase verified from system architecture corpus.',
