@@ -70,7 +70,10 @@ import {
   safePost,
   subscribeConnectionState,
   getBackendUrl,
+  getDefaultBackendUrl,
+  normalizeBackendUrl,
   setBackendUrl,
+  testBackendConnection,
   BackendConnectionState
 } from './api';
 import { ImageStudioWorkspaceView } from './ImageStudioWorkspaceView';
@@ -281,8 +284,8 @@ export default function App() {
   });
 
   const [connectionStatus, setConnectionStatus] = useState<BackendConnectionState>({
-    reachable: true,
-    lastChecked: Date.now(),
+    reachable: false,
+    lastChecked: 0,
     configuredUrl: '',
   });
 
@@ -1105,7 +1108,7 @@ export default function App() {
         </header>
 
         {/* Visible Backend Connection Status Warning Banner — only shown if a backend URL is configured but unreachable */}
-        {!connectionStatus.reachable && Boolean(getBackendUrl()) && (
+        {connectionStatus.lastChecked > 0 && !connectionStatus.reachable && Boolean(getBackendUrl()) && (
           <div className="bg-amber-950/70 border-b border-amber-500/40 px-4 py-2 text-xs text-amber-200 flex items-center justify-between shrink-0 animate-in fade-in">
             <div className="flex items-center space-x-2">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -4620,7 +4623,13 @@ function CleanSettingsWorkspaceView({
   const [backendUrlInput, setBackendUrlInput] = useState(() => getBackendUrl());
   const [backendUrlSaved, setBackendUrlSaved] = useState(false);
   const [backendTesting, setBackendTesting] = useState(false);
-  const [backendTestResult, setBackendTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [backendTestResult, setBackendTestResult] = useState<{
+    success: boolean;
+    message: string;
+    httpStatus?: number;
+    latencyMs?: number;
+    responseDetails?: string;
+  } | null>(null);
   const [intelStatus, setIntelStatus] = useState<any>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [evalResults, setEvalResults] = useState<any>(null);
@@ -4701,57 +4710,36 @@ function CleanSettingsWorkspaceView({
 
   const handleSaveBackendUrl = (e: React.FormEvent) => {
     e.preventDefault();
-    setBackendUrl(backendUrlInput);
-    setBackendUrlSaved(true);
-    setTimeout(() => setBackendUrlSaved(false), 3000);
+    try {
+      setBackendUrl(backendUrlInput);
+      setBackendUrlInput(getBackendUrl());
+      setBackendTestResult(null);
+      setBackendUrlSaved(true);
+      setTimeout(() => setBackendUrlSaved(false), 3000);
+    } catch (err: any) {
+      setBackendTestResult({ success: false, message: err?.message || 'Could not save the backend URL.' });
+    }
+  };
+
+  const handleResetBackendUrl = () => {
+    try {
+      setBackendUrl('');
+      setBackendUrlInput(getDefaultBackendUrl());
+      setBackendTestResult(null);
+      setBackendUrlSaved(false);
+    } catch (err: any) {
+      setBackendTestResult({ success: false, message: err?.message || 'Could not reset the backend URL.' });
+    }
   };
 
   const handleTestBackendConnection = async () => {
-    const targetUrl = backendUrlInput.trim().replace(/\/+$/, '');
-    if (!targetUrl) {
-      setBackendTestResult({
-        success: false,
-        message: 'No backend URL entered. The app is currently operating in Local Offline Mode. Enter your HTTPS cloud URL (e.g. https://my-backend.com) to connect.',
-      });
-      return;
-    }
-
-    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-      setBackendTestResult({
-        success: false,
-        message: 'Invalid URL. Please include https:// (e.g. https://my-backend.com)',
-      });
-      return;
-    }
-
     setBackendTesting(true);
     setBackendTestResult(null);
     try {
-      const testEndpoint = `${targetUrl}/api/status`;
-      const res = await fetch(testEndpoint, { signal: AbortSignal.timeout(6000) });
-      const ct = res.headers.get('content-type') || '';
-      if (res.ok && ct.includes('application/json')) {
-        const data = await res.json();
-        setBackendTestResult({
-          success: true,
-          message: `Connected successfully to ${data.name || 'RARE Server'} (HTTP ${res.status})`,
-        });
-      } else if (res.ok && !ct.includes('application/json')) {
-        setBackendTestResult({
-          success: false,
-          message: `Server reached (HTTP ${res.status}), but returned HTML instead of RARE JSON API. Ensure the URL points to your deployed Express server backend.`,
-        });
-      } else {
-        setBackendTestResult({
-          success: false,
-          message: `Server returned HTTP ${res.status}: ${res.statusText}`,
-        });
-      }
+      const targetUrl = normalizeBackendUrl(backendUrlInput);
+      setBackendTestResult(await testBackendConnection(targetUrl));
     } catch (err: any) {
-      setBackendTestResult({
-        success: false,
-        message: `Failed to connect: ${err?.message || 'Network unreachable'}. Make sure your cloud server is running and accessible over HTTPS.`,
-      });
+      setBackendTestResult({ success: false, message: err?.message || 'Invalid backend URL.' });
     } finally {
       setBackendTesting(false);
     }
@@ -5108,11 +5096,17 @@ function CleanSettingsWorkspaceView({
           <p className={`text-[11px] ${t.textMuted} leading-relaxed`}>
             When installed on another phone (Android APK), local addresses (<code className="font-mono text-amber-300">localhost</code> / <code className="font-mono text-amber-300">127.0.0.1</code>) refer to the phone hardware itself. Configure your publicly deployed HTTPS backend server URL below to enable full online cloud sync across Wi-Fi or mobile data.
           </p>
+          <p className={`text-[11px] ${t.textMuted} break-all`}>
+            Effective backend:{' '}
+            <code className="font-mono text-sky-300">
+              {getBackendUrl() || 'Not configured — Android remains offline until an HTTPS URL is set'}
+            </code>
+          </p>
           <form onSubmit={handleSaveBackendUrl} className="space-y-2">
             <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="url"
-                placeholder="https://your-rare-backend.com (leave blank for local mode)"
+                placeholder="Automatic on web; enter https://… for Android or a separate backend"
                 value={backendUrlInput}
                 onChange={(e) => {
                   setBackendUrlInput(e.target.value);
@@ -5129,6 +5123,13 @@ function CleanSettingsWorkspaceView({
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${backendTesting ? 'animate-spin' : ''}`} />
                   <span>{backendTesting ? 'Testing...' : 'Test Connection'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetBackendUrl}
+                  className={`px-3 py-2 rounded-lg border ${t.cardBorder} ${t.cardSub} hover:border-white/20 text-xs font-semibold transition`}
+                >
+                  Reset default
                 </button>
                 <button
                   type="submit"
@@ -5151,7 +5152,18 @@ function CleanSettingsWorkspaceView({
                 ) : (
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
                 )}
-                <span>{backendTestResult.message}</span>
+                <span className="min-w-0">
+                  <span>{backendTestResult.message}</span>
+                  {backendTestResult.responseDetails && (
+                    <span className="block mt-1 opacity-80">{backendTestResult.responseDetails}</span>
+                  )}
+                  {!backendTestResult.responseDetails && (
+                    <span className="block mt-1 opacity-80">
+                      {backendTestResult.httpStatus !== undefined && `HTTP ${backendTestResult.httpStatus} · `}
+                      {backendTestResult.latencyMs !== undefined && `Latency: ${backendTestResult.latencyMs} ms`}
+                    </span>
+                  )}
+                </span>
               </div>
             )}
           </form>

@@ -1,11 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { MemoryRecord } from '../types.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '../../../');
+const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
 const KNOWLEDGE_DIR = path.resolve(PROJECT_ROOT, 'knowledge');
 const MEMORIES_FILE = path.resolve(KNOWLEDGE_DIR, 'memories.json');
 const CONVERSATIONS_FILE = path.resolve(KNOWLEDGE_DIR, 'conversations.json');

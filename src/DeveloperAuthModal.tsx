@@ -13,7 +13,7 @@ import {
   Share2
 } from 'lucide-react';
 import { ThemeConfig } from './theme';
-import { safePost } from './api';
+import { resolveApiUrl, safePost } from './api';
 
 interface DeveloperAuthModalProps {
   t: ThemeConfig;
@@ -60,12 +60,20 @@ export function DeveloperAuthModal({
     setLoading(true);
     setError('');
     try {
-      const res = await safePost<any>('/api/developer/auth', { passkey });
-      if (res?.success) {
+      const response = await fetch(resolveApiUrl('/api/developer/auth'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passkey }),
+      });
+      const res = await response.json().catch(() => null);
+      if (response.ok && res?.success) {
         onSuccess();
         onClose();
       } else {
-        setError(res?.error?.message || 'Invalid developer passkey.');
+        setError(
+          res?.error?.message ||
+          (response.ok ? 'Invalid developer passkey.' : `Developer sign-in failed (HTTP ${response.status}).`)
+        );
       }
     } catch {
       setError('Connection error.');

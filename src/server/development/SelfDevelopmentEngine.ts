@@ -1,13 +1,10 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { CheckpointStore } from '../storage/CheckpointStore.js';
 import { TrajectoryStore } from '../storage/TrajectoryStore.js';
 import { ToolExecutor } from '../tools/ToolExecutor.js';
 import { DevelopmentTrajectory } from '../types.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '../../../');
+const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
 
 export interface SelfDevRequest {
   instruction: string;

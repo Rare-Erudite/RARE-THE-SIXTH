@@ -1,9 +1,9 @@
+import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import { MemoryStore, ConversationStore } from './src/server/storage/MemoryStore.js';
@@ -15,11 +15,9 @@ import { ProviderRegistry } from './src/server/providers/ProviderRegistry.js';
 import { SelfDevelopmentEngine } from './src/server/development/SelfDevelopmentEngine.js';
 import { BenchmarkSuite } from './src/server/evaluation/BenchmarkSuite.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-const PORT = 3000;
+const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
+const PORT = process.env.PORT === undefined ? 5000 : Number(process.env.PORT);
 
 app.use(cors());
 app.use(express.json({ limit: '15mb' }));
@@ -45,7 +43,7 @@ let autonomyLevel = 2;
 let activeTheme: 'blue' | 'white' | 'dark' | 'red' | 'green' | 'yellow' = 'blue';
 
 // Developer authorization secret & active session
-let currentDeveloperPasskey = process.env.RARE_DEV_KEY || 'rare-master-dev';
+let currentDeveloperPasskey = process.env.RARE_DEV_KEY?.trim() || null;
 let developerAuthenticated = false;
 let devSessionExpiry = 0;
 
@@ -659,62 +657,61 @@ async function generateAssistantReply(
 // -----------------------------------------------------------------------------
 
 // Health
-app.get('/api/health', async (req, res) => {
-  const { info: activeInfo } = await providerRegistry.getActiveProvider();
-  const allProviders = await providerRegistry.getAllProviders();
-  const lastEval = benchmarkSuite.getLastReport();
+app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
+    name: 'RARE Server',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime()),
     release: '045',
     status: 'healthy',
     autonomy: autonomyLevel,
     assistant_name: assistantName,
     theme: activeTheme,
-    providers: {
-      active: activeInfo.id,
-      native_intelligence: {
-        name: activeInfo.name,
-        version: activeInfo.version,
-        architecture: activeInfo.architecture,
-        requires_api_key: activeInfo.requires_api_key,
-        status: activeInfo.is_available ? 'operational' : 'unavailable',
-        weights_location: activeInfo.weights_location,
-        execution_environment: activeInfo.execution_environment,
-        evaluation_score: lastEval ? lastEval.overallScore : 'Not yet evaluated',
-      },
-      coprocessor: (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 5) ? 'gemini-coprocessor-available' : 'none',
-      available: allProviders.map((p) => ({
-        id: p.id,
-        name: p.name,
-        available: p.is_available,
-        requires_api_key: p.requires_api_key,
+  });
+});
+
+// Detailed service status intentionally distinguishes configuration from reachability.
+app.get('/api/status', async (_req, res) => {
+  const providers = await providerRegistry.getAllProviders();
+  const geminiConfigured = Boolean(process.env.GEMINI_API_KEY?.trim());
+
+  res.json({
+    ok: true,
+    name: 'RARE Server',
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    services: {
+      server: { status: 'operational' },
+      storage: { status: 'not_checked', type: 'local-json-files' },
+      providers: providers.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        configured: provider.id === 'gemini-coprocessor' ? geminiConfigured : true,
+        connectivity: provider.id === 'local-ollama'
+          ? provider.is_available ? 'reachable' : 'unreachable'
+          : provider.id === 'rare-offline-cognitive'
+            ? 'local'
+            : 'not_checked',
       })),
-    },
-    checks: {
-      syntax: 'pass',
-      imports: 'pass',
-      sandboxing: 'enforced',
-      single_writer_lock: 'acquired',
-      toolchains: 'ready',
-      intelligence_module: 'operational',
     },
   });
 });
 
 // Download Source & Git Bundle
 app.get('/api/download/source', (req, res) => {
-  const file = path.resolve(__dirname, 'exports', 'rare-045-source.tar.gz');
+  const file = path.resolve(PROJECT_ROOT, 'exports', 'rare-045-source.tar.gz');
   res.download(file, 'rare-045-source.tar.gz');
 });
 
 app.get('/api/download/bundle', (req, res) => {
-  const file = path.resolve(__dirname, 'exports', 'rare-045-repo.bundle');
+  const file = path.resolve(PROJECT_ROOT, 'exports', 'rare-045-repo.bundle');
   res.download(file, 'rare-045-repo.bundle');
 });
 
 // Download Packaged Android APK
 app.get('/api/download/apk', (req, res) => {
-  const primary = path.resolve(__dirname, 'exports', 'rare-v1.0.0-release.apk');
+  const primary = path.resolve(PROJECT_ROOT, 'exports', 'rare-v1.0.0-release.apk');
   const fallback = path.resolve(process.cwd(), 'exports', 'rare-v1.0.0-release.apk');
   const systemFallback = '/exports/rare-v1.0.0-release.apk';
   const targetFile = fs.existsSync(primary) ? primary : fs.existsSync(fallback) ? fallback : fs.existsSync(systemFallback) ? systemFallback : null;
@@ -730,7 +727,7 @@ app.get('/api/download/apk', (req, res) => {
 
 // Download Windows Standalone EXE
 app.get('/api/download/exe', (req, res) => {
-  const file = path.resolve(__dirname, 'exports', 'rare-v1.0.0-windows-x64.exe');
+  const file = path.resolve(PROJECT_ROOT, 'exports', 'rare-v1.0.0-windows-x64.exe');
   if (fs.existsSync(file)) {
     res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
     res.setHeader('Content-Disposition', 'attachment; filename="RARE-v1.0.0-windows-x64.exe"');
@@ -1072,6 +1069,11 @@ app.post('/api/settings', (req, res) => {
 // Developer Authentication Gate
 app.post('/api/developer/auth', (req, res) => {
   const { passkey } = req.body;
+  if (!currentDeveloperPasskey) {
+    return res.status(503).json({
+      error: { message: 'Developer access is disabled because RARE_DEV_KEY is not configured on the server.' },
+    });
+  }
   if (passkey === currentDeveloperPasskey) {
     developerAuthenticated = true;
     devSessionExpiry = Date.now() + 4 * 3600 * 1000; // 4 hours
@@ -1106,6 +1108,11 @@ app.post('/api/developer/logout', (req, res) => {
 // Guarded Passkey Change
 app.post('/api/developer/change-passkey', (req, res) => {
   const { currentPasskey, newPasskey } = req.body;
+  if (!currentDeveloperPasskey) {
+    return res.status(503).json({
+      error: { message: 'Developer access is disabled because RARE_DEV_KEY is not configured on the server.' },
+    });
+  }
   if (!currentPasskey || currentPasskey !== currentDeveloperPasskey) {
     return res.status(401).json({ error: { message: 'Current master passkey does not match.' } });
   }
@@ -2713,11 +2720,11 @@ app.post('/api/images/edit', async (req, res) => {
 // Download Standalone Android APK Endpoint
 app.get('/api/download/apk', (req, res) => {
   const candidatePaths = [
-    path.resolve(__dirname, 'exports', 'rare-v1.0.0-release.apk'),
-    path.resolve(__dirname, 'public', 'rare-v1.0.0-release.apk'),
-    path.resolve(__dirname, 'dist', 'rare-v1.0.0-release.apk'),
+    path.resolve(PROJECT_ROOT, 'exports', 'rare-v1.0.0-release.apk'),
+    path.resolve(PROJECT_ROOT, 'public', 'rare-v1.0.0-release.apk'),
+    path.resolve(PROJECT_ROOT, 'dist', 'rare-v1.0.0-release.apk'),
     '/tmp/android_apk_build/bin/rare-v1.0.0-release.apk',
-    path.resolve(__dirname, 'rare-v1.0.0-release.apk'),
+    path.resolve(PROJECT_ROOT, 'rare-v1.0.0-release.apk'),
   ];
 
   for (const apkPath of candidatePaths) {
@@ -2735,14 +2742,24 @@ app.get('/api/download/apk', (req, res) => {
   });
 });
 
+// Unknown API routes must remain JSON 404s rather than falling through to the SPA.
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: { message: 'API endpoint not found.' } });
+});
+
 // Start Server with Vite Middleware in Development
 async function startServer() {
-  const isProduction = process.env.NODE_ENV === 'production';
+  const isProduction = process.env.NODE_ENV === 'production' || process.argv.includes('--production');
+  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+    throw new Error(`Invalid PORT value "${process.env.PORT}". Set PORT to an integer between 1 and 65535.`);
+  }
+
   const httpServer = http.createServer(app);
+  let vite: import('vite').ViteDevServer | undefined;
 
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
+    vite = await createViteServer({
       server: {
         middlewareMode: true,
         host: '0.0.0.0',
@@ -2753,15 +2770,68 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    const frontendDist = path.resolve(PROJECT_ROOT, 'dist');
+    if (!fs.existsSync(path.join(frontendDist, 'index.html'))) {
+      throw new Error('Production frontend build is missing. Run "npm run build" before "npm start".');
+    }
+    app.use(express.static(frontendDist));
     app.get('*', (req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      res.sendFile(path.join(frontendDist, 'index.html'));
     });
   }
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`RARE Core & Command Center running on http://0.0.0.0:${PORT}`);
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return next(err);
+    const status = Number(err?.status || err?.statusCode);
+    const clientError = Number.isInteger(status) && status >= 400 && status < 500;
+    const responseStatus = clientError ? status : 500;
+    const message = err?.type === 'entity.parse.failed'
+      ? 'Request body must contain valid JSON.'
+      : clientError
+        ? err.message || 'Invalid request.'
+        : 'Internal server error.';
+    if (responseStatus >= 500) console.error('[HTTP] Request failed:', err);
+    res.status(responseStatus).json({ error: { message } });
   });
+
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      httpServer.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      httpServer.off('error', onError);
+      resolve();
+    };
+    httpServer.once('error', onError);
+    httpServer.once('listening', onListening);
+    httpServer.listen(PORT, '0.0.0.0');
+  });
+
+  console.log(`RARE Core & Command Center listening on 0.0.0.0:${PORT} (${isProduction ? 'production' : 'development'})`);
+  httpServer.on('error', (error) => {
+    console.error('[HTTP] Server error:', error);
+    process.exitCode = 1;
+  });
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      console.log(`[HTTP] Received ${signal}; shutting down.`);
+      const forceCloseTimer = setTimeout(() => httpServer.closeAllConnections(), 10000);
+      forceCloseTimer.unref();
+      httpServer.close(async (error) => {
+        clearTimeout(forceCloseTimer);
+        if (error) {
+          console.error('[HTTP] Error while shutting down:', error);
+          process.exitCode = 1;
+        }
+        if (vite) await vite.close();
+      });
+    });
+  }
 }
 
-startServer();
+startServer().catch((error) => {
+  console.error('[RARE] Startup failed:', error?.message || error);
+  process.exitCode = 1;
+});

@@ -1,6 +1,7 @@
 # Node.js
 node_modules/
 dist/
+server-build/
 bun.lock
 
 # Python

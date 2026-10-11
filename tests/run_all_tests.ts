@@ -3,6 +3,7 @@ import { runToolTests } from './test_tools.js';
 import { runMemoryTests } from './test_memory.js';
 import { runDevelopmentTests } from './test_development.js';
 import { runEvaluationTests } from './test_evaluation.js';
+import { runApiConfigurationTests } from './test_api_configuration.js';
 
 async function main() {
   console.log('=====================================================');
@@ -10,6 +11,8 @@ async function main() {
   console.log('=====================================================\n');
 
   try {
+    await runApiConfigurationTests();
+    console.log();
     await runModelProviderTests();
     console.log();
     await runToolTests();

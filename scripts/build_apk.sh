@@ -4,7 +4,7 @@ set -e
 PROJECT_ROOT="$(pwd)"
 
 echo "=== [1/8] Building Web Production Assets with Vite ==="
-npm run build
+npm run build:web
 
 BUILD_DIR="/tmp/android_apk_build"
 rm -rf "$BUILD_DIR"

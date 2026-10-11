@@ -1,66 +1,44 @@
 # RARE
 
-RARE is a protected, self-building personal AI core with a connected Flutter interface. The current release is **RARE 045**.
+RARE is a React 19 / Vite web application served by a unified Express and TypeScript backend. It includes chat, projects and build tools, documents, research, memory, provider routing, settings, and a hybrid Android WebView client.
 
-## What is included
+## Run locally
 
-The core provides persistent conversations, memory, documents, research, model-provider routing, development/self-building, repair and rollback, permissions, device tools, voice services, assistant orchestration, specialist agents, event/observability services and a local JSON HTTP API.
+Requires Node.js 20.19 or newer.
 
-The Flutter client provides connected workspaces for Command Center, Chat / Ask, Projects / Build, Documents, Research, Live Conversation, Memory, Tools / Device Control and Settings. The same core is used by the different entry points so a request made in Chat can invoke the build system, while the Build workspace exposes richer engineering controls and live agent/process visibility.
-
-RARE has a separate assistant layer. The default assistant name is **RARE**; a user may explicitly choose another name. The assistant can handle conversational requests, invoke RARE capabilities, and route explicit requests to a paired laptop or phone during development/testing. Login/account identity is deliberately deferred until the system is validated without it.
-
-## Free local model setup
-
-The default testing provider is local Ollama. The release configuration pins `qwen2.5-coder:7b` and allows fallback to any compatible model actually installed in Ollama. RARE does **not** automatically download a model and basic local operation does not require a paid API key.
-
-Ollama is not required on an Android phone for the phone client to exist. In a connected deployment, heavier model work can be handled by the laptop/core or another RARE compute node.
-
-## Windows core run
-
-Preferred first run: open the folder in VS Code and use the automatic `RARE: Start` workspace task, or double-click `START_RARE.cmd`. It creates `.venv` and installs required packages when needed. The manual Python commands below are for development/testing after the environment exists.
-
-```powershell
-cd <extracted-release-folder>
-.\.venv\Scripts\python.exe -m rare_core selftest
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m rare_core providers
-.\.venv\Scripts\python.exe -m rare_core serve
+```sh
+npm install
+npm run dev
 ```
 
-The local API defaults to `127.0.0.1:8765`.
+The Express server binds to `0.0.0.0` and uses `PORT` when supplied by the host; it defaults to port `5000`. Development serves Vite through the same Express process.
 
-For development-time phone↔laptop communication over a private LAN:
-
-```powershell
-py -3.13 -m rare_core serve --host 0.0.0.0
+```sh
+npm run lint
+npm test
+npm run build
+npm start
 ```
 
-Remote clients must use the generated bearer token stored in `.rare/api_token`. Do not expose the API to an untrusted network.
+`npm start` runs the production server and expects `npm run build` to have completed first. The build creates the static frontend in `dist/` and emits the TypeScript server to `server-build/`.
 
-## Flutter app
+## Configuration
 
-Before the first Flutter build, prepare the optional local neural voice assets:
+Copy `.env.example` to `.env` for local settings. Provider credentials are read server-side only. `GEMINI_API_KEY` enables the optional Gemini coprocessor; without it, RARE keeps its offline engine. `RARE_DEV_KEY` enables Developer Space; developer login is disabled when it is absent. Never put API keys in `VITE_*` variables.
 
-```powershell
-.\scripts\prepare_voice_model.ps1
-```
+On the web, the backend URL defaults to the current page origin, so a combined frontend/backend deployment needs no separate URL. Settings accepts an HTTPS URL for a separately hosted backend. The Android client uses its saved WebView setting or a public URL supplied at build time as `VITE_BACKEND_URL`; its `rare.local` asset origin is never treated as the API server. Saved URLs are local to that browser or APK installation.
 
-The script is safe to rerun: existing files are reused, and the model is SHA-256 verified. The source archive does not contain the roughly 63 MB model binary.
+## Backend checks
 
+- `GET /api/health` reports server liveness, status, and timestamp.
+- `GET /api/status` reports provider configuration and checked local Ollama connectivity separately; provider credentials and persistent storage are not claimed as reachable without a check.
 
-Open `rare_app` with a Flutter-capable IDE and run the app against the local RARE core. On the laptop the default core URL is `http://127.0.0.1:8765`. On a phone, use the laptop's private LAN IP and the API token when the two devices are paired.
+The Settings connection test calls `/api/health` and requires a valid JSON health response.
 
-The source tree contains the Flutter client code but this release does not claim an APK or Windows native binary unless the corresponding Flutter/Dart/native toolchains actually build and verify them.
+## Android
 
-## Verification principle
+The APK wrapper is generated by `scripts/build_apk.sh` around the built web assets. Configure a public HTTPS endpoint in Settings on the APK, or set `VITE_BACKEND_URL` before building it. The URL is not synchronized between web browsers and Android storage. Building the APK also requires the Android packaging tools used by that script.
 
-Passing tests is not treated as proof that the product is complete. Release checks cover syntax, imports, configuration, runtime services, model selection, persistence, API behavior, permissions, agent orchestration, repair/rollback paths, UI-source consistency and archive hygiene. Platform-specific builds remain platform tests.
+## Production data
 
-### Windows first-run
-Double-click `START_RARE.cmd`. It creates `.venv` and installs the required packages only when needed, then starts RARE.
-
-
-## One-step VS Code startup
-
-Open this folder in VS Code. The workspace automatically runs `START_RARE.cmd` on folder open; it creates the local Python environment and starts RARE.
+The current server stores memory, conversations, checkpoints, and updates in local JSON files and also keeps some runtime state in memory. Published Replit filesystems are not persistent across publishes or restarts. Do not publish this version for real user data until a durable production storage approach is chosen and implemented.

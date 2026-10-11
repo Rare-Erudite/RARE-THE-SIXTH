@@ -1,12 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { fileURLToPath } from 'url';
 import { CheckpointRecord } from '../types.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '../../../');
+const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
 const CHECKPOINTS_DIR = path.resolve(PROJECT_ROOT, '.rare', 'checkpoints');
 const REGISTRY_FILE = path.resolve(CHECKPOINTS_DIR, 'checkpoints_registry.json');
 

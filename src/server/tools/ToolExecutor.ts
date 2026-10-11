@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ToolName, ToolSpec, ToolExecutionResult, RiskLevel } from '../types.js';
@@ -8,9 +7,7 @@ import { MemoryStore } from '../storage/MemoryStore.js';
 import { CheckpointStore } from '../storage/CheckpointStore.js';
 
 const execFileAsync = promisify(execFile);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '../../../');
+const PROJECT_ROOT = path.resolve(process.env.RARE_APP_ROOT || process.cwd());
 
 // Allowlist from rare.config.json
 const COMMAND_ALLOWLIST = new Set([

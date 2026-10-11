@@ -1,9 +1,10 @@
 /**
- * RARE Resilient API Client
- * Configurable backend endpoint with transparent connection error reporting.
+ * RARE API client. Backend availability is only updated after an HTTP request
+ * has produced evidence; a configured URL alone is never treated as connected.
  */
 
-// Global connection state
+const BACKEND_URL_KEY = 'rare_backend_url';
+
 export interface BackendConnectionState {
   reachable: boolean;
   lastChecked: number;
@@ -11,9 +12,17 @@ export interface BackendConnectionState {
   configuredUrl: string;
 }
 
+export interface BackendHealthTestResult {
+  success: boolean;
+  message: string;
+  httpStatus?: number;
+  latencyMs?: number;
+  responseDetails?: string;
+}
+
 let connectionState: BackendConnectionState = {
-  reachable: true,
-  lastChecked: Date.now(),
+  reachable: false,
+  lastChecked: 0,
   configuredUrl: '',
 };
 
@@ -37,32 +46,128 @@ function updateConnectionState(reachable: boolean, error?: string) {
 }
 
 /**
- * Returns the currently active backend URL.
- * Checks localStorage first, then window injection, then Vite environment variable.
+ * Validate and normalize an HTTP(S) backend base URL.
+ * Plain HTTP is limited to loopback addresses for local development.
  */
-export function getBackendUrl(): string {
+export function normalizeBackendUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error('Enter a complete backend URL, including https://.');
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Backend URLs must use HTTPS (HTTP is allowed only for localhost development).');
+  }
+  if (!parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('Enter a backend URL without credentials, query parameters, or a fragment.');
+  }
+  if (
+    isStandaloneMobileApp() &&
+    ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname.toLowerCase())
+  ) {
+    throw new Error('Android must use the public backend URL; localhost and loopback addresses refer to the phone.');
+  }
+  if (
+    parsed.protocol === 'http:' &&
+    !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname.toLowerCase())
+  ) {
+    throw new Error('Use HTTPS for remote backends. Plain HTTP is allowed only on localhost.');
+  }
+
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+}
+
+function getStoredBackendUrl(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return window.localStorage.getItem(BACKEND_URL_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function getConfiguredDefault(): string {
   if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem('rare_backend_url');
-    if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
-    if ((window as any).__RARE_BACKEND_URL__) {
-      return String((window as any).__RARE_BACKEND_URL__).trim().replace(/\/+$/, '');
+    const injected = (window as any).__RARE_BACKEND_URL__;
+    if (typeof injected === 'string' && injected.trim()) {
+      try {
+        return normalizeBackendUrl(injected);
+      } catch {
+        return injected.trim();
+      }
     }
   }
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BACKEND_URL) {
-    return String(import.meta.env.VITE_BACKEND_URL).trim().replace(/\/+$/, '');
+
+  const envUrl = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_BACKEND_URL : undefined;
+  if (typeof envUrl === 'string' && envUrl.trim()) {
+    try {
+      return normalizeBackendUrl(envUrl);
+    } catch {
+      return envUrl.trim();
+    }
   }
+
+  // The bundled Android WebView uses rare.local as its virtual asset origin.
+  // It is not a backend, so never use it as the remote API endpoint.
+  if (typeof window !== 'undefined' && !isStandaloneMobileApp()) {
+    const origin = window.location?.origin;
+    if (origin && origin !== 'null') {
+      try {
+        return normalizeBackendUrl(origin);
+      } catch {
+        // Non-HTTP origins (for example file://) do not identify an API host.
+      }
+    }
+  }
+
   return '';
 }
 
-export function setBackendUrl(url: string) {
-  if (typeof window !== 'undefined') {
-    if (!url || !url.trim()) {
-      localStorage.removeItem('rare_backend_url');
-    } else {
-      localStorage.setItem('rare_backend_url', url.trim().replace(/\/+$/, ''));
+/** The configured manual URL, otherwise the default app origin/build URL. */
+export function getBackendUrl(): string {
+  const saved = getStoredBackendUrl();
+  if (saved.trim()) {
+    try {
+      return normalizeBackendUrl(saved);
+    } catch {
+      // Keep legacy invalid values visible in Settings so the user can repair them.
+      return saved.trim();
     }
-    updateConnectionState(connectionState.reachable);
   }
+  return getConfiguredDefault();
+}
+
+/** Default URL without consulting the manually saved override. */
+export function getDefaultBackendUrl(): string {
+  return getConfiguredDefault();
+}
+
+/** Save a validated override, or clear it to restore the default URL. */
+export function setBackendUrl(url: string) {
+  const normalized = normalizeBackendUrl(url);
+  if (typeof window === 'undefined') return;
+
+  try {
+    if (!normalized) {
+      window.localStorage.removeItem(BACKEND_URL_KEY);
+    } else {
+      window.localStorage.setItem(BACKEND_URL_KEY, normalized);
+    }
+  } catch {
+    throw new Error('This browser could not save the backend URL. Check its storage settings and try again.');
+  }
+
+  connectionState = {
+    reachable: false,
+    lastChecked: 0,
+    configuredUrl: getBackendUrl(),
+  };
+  listeners.forEach((fn) => fn(connectionState));
 }
 
 export function isStandaloneMobileApp(): boolean {
@@ -75,15 +180,89 @@ export function isStandaloneMobileApp(): boolean {
 }
 
 export function resolveApiUrl(path: string): string {
-  if (path.startsWith('http://') || path.startsWith('https://')) {
-    return path;
-  }
+  if (/^https?:\/\//i.test(path)) return path;
   const base = getBackendUrl();
-  if (base) {
-    const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    return `${base}${cleanPath}`;
+  if (!base) return path;
+  const normalizedBase = normalizeBackendUrl(base);
+  return `${normalizedBase}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+/** Call the real health route and validate the response instead of trusting a URL. */
+export async function testBackendConnection(url: string): Promise<BackendHealthTestResult> {
+  let target: string;
+  try {
+    target = normalizeBackendUrl(url);
+  } catch (err: any) {
+    const message = err?.message || 'Invalid backend URL.';
+    updateConnectionState(false, message);
+    return { success: false, message };
   }
-  return path;
+  if (!target) {
+    const message = 'No backend URL is configured. Set one or reset to the default.';
+    updateConnectionState(false, message);
+    return { success: false, message };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(`${target}/api/health`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    const latencyMs = Date.now() - startedAt;
+    const contentType = response.headers.get('content-type') || '';
+    const base = {
+      httpStatus: response.status,
+      latencyMs,
+    };
+
+    if (!response.ok) {
+      const message = `Backend returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.`;
+      updateConnectionState(true, message);
+      return { ...base, success: false, message };
+    }
+    if (!/\bapplication\/(?:[\w.+-]+\+)?json\b/i.test(contentType)) {
+      const message = `Backend responded with HTTP ${response.status}, but the health route did not return JSON.`;
+      updateConnectionState(true, message);
+      return { ...base, success: false, message };
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch {
+      const message = 'Backend returned invalid JSON from its health route.';
+      updateConnectionState(true, message);
+      return { ...base, success: false, message };
+    }
+
+    const timestamp = typeof data?.timestamp === 'string' ? Date.parse(data.timestamp) : Number.NaN;
+    if (data?.ok !== true || data?.status !== 'healthy' || !Number.isFinite(timestamp)) {
+      const message = 'Backend health response is missing a valid healthy status or timestamp.';
+      updateConnectionState(true, message);
+      return { ...base, success: false, message };
+    }
+
+    updateConnectionState(true);
+    return {
+      ...base,
+      success: true,
+      message: `${data.name || 'RARE backend'} is healthy.`,
+      responseDetails: `HTTP ${response.status} · Latency: ${latencyMs} ms · Status: ${data.status} · Checked: ${new Date(timestamp).toLocaleString()}`,
+    };
+  } catch (err: any) {
+    const message = err?.name === 'AbortError'
+      ? 'Backend health check timed out after 8 seconds.'
+      : `Could not reach the backend: ${err?.message || 'network request failed'}.`;
+    updateConnectionState(false, message);
+    return { success: false, message, latencyMs: Date.now() - startedAt };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function safeFetch<T>(
@@ -92,38 +271,45 @@ export async function safeFetch<T>(
   fallback?: T,
   retries = 1
 ): Promise<T | null> {
-  const fullUrl = resolveApiUrl(url);
-
-  // If running inside standalone mobile APK with no remote backend configured, operate in local offline mode
   if (isStandaloneMobileApp() && !getBackendUrl()) {
-    updateConnectionState(true);
+    updateConnectionState(false, 'No backend URL is configured; this Android app is in offline mode.');
     return fallback !== undefined ? fallback : null;
   }
 
   for (let i = 0; i <= retries; i++) {
     try {
+      const fullUrl = resolveApiUrl(url);
       const res = await fetch(fullUrl, options);
       const contentType = res.headers.get('content-type') || '';
 
-      if (res.ok) {
-        if (!contentType.includes('application/json')) {
-          // Guard against HTML bodies being parsed as JSON (e.g. 404/SPA fallbacks returning <!doctype html>)
-          updateConnectionState(false, 'Server returned HTML instead of JSON API response.');
-          return fallback !== undefined ? fallback : null;
-        }
+      // Any HTTP response proves that the host is reachable, even if this
+      // particular API request failed or returned an unexpected body.
+      if (!res.ok) {
+        updateConnectionState(true, `HTTP ${res.status}: ${res.statusText || 'request failed'}`);
+        return fallback !== undefined ? fallback : null;
+      }
+      if (!/\bapplication\/(?:[\w.+-]+\+)?json\b/i.test(contentType)) {
+        updateConnectionState(true, 'Server responded, but the API response was not JSON.');
+        return fallback !== undefined ? fallback : null;
+      }
+
+      try {
+        const data = (await res.json()) as T;
         updateConnectionState(true);
-        return (await res.json()) as T;
-      } else {
-        updateConnectionState(false, `HTTP ${res.status}: ${res.statusText}`);
+        return data;
+      } catch {
+        updateConnectionState(true, 'Server responded with invalid JSON.');
+        return fallback !== undefined ? fallback : null;
       }
     } catch (err: any) {
       if (i === retries) {
         updateConnectionState(false, err?.message || 'Network unreachable');
       } else {
-        await new Promise((r) => setTimeout(r, 300 * (i + 1)));
+        await new Promise((resolve) => setTimeout(resolve, 300 * (i + 1)));
       }
     }
   }
+
   return fallback !== undefined ? fallback : null;
 }
 
